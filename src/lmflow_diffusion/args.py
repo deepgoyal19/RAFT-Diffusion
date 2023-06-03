@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
-"""This script defines dataclasses: ModelArguments and DatasetArguments,
+"""This script defines dataclasses: ModelArguments, InferenceAguments and DatasetArguments,
 that contain the arguments for the model and dataset used in training.
 
 
@@ -278,4 +278,6 @@ class InferenceArguments:
 
 @dataclass
 class RaftAlignterArguments:
-    
+
+    topk: int = field(
+        default=1, metadata={"help": ""})
