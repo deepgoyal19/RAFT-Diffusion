@@ -9,26 +9,16 @@ that contain the arguments for the model and dataset used in training.
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from transformers.utils.versions import require_version
-
-from transformers import (
-    TrainingArguments,
-)
-
 # from lmflow.args import ModelArguments,DatasetArguments, EvaluatorArguments, BenchmarkingArguments
-
 
 from dataclasses import dataclass, field
 from typing import Optional
-from transformers import TrainingArguments
 from diffusers import StableDiffusionPipeline
 import torch
 
 @dataclass
-class FinetunerArguments(TrainingArguments):
-    """
-    Adapt transformers.TrainingArguments
-    """
+class FinetunerArguments:
+
     pretrained_model_name_or_path: Optional[str] = field(
         default=None, metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models."})
     
@@ -211,8 +201,8 @@ class InferenceArguments:
 
 
     guidance_scale: float = field(
-        default=7.5, metadata={"help": '''Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).`guidance_scale` is defined as `w` of equation 2. of [Imagen
-                Paper](https://arxiv.org/pdf/2205.11487.pdf). Guidance scale is enabled by setting `guidance_scale >
+        default=7.5, metadata={"help": '''Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).`guidance_scale` is defined as `w` of equation 2. of [ImagenPaper](https://arxiv.org/pdf/2205.11487.pdf). 
+                Guidance scale is enabled by setting `guidance_scale >
                 1`. Higher guidance scale encourages to generate images that are closely linked to the text `prompt`,
                 usually at the expense of lower image quality.'''})
 
@@ -248,9 +238,8 @@ class InferenceArguments:
 
 
     negative_prompt_embeds: Optional[torch.FloatTensor] = field(
-        default=None, metadata={"help": '''Pre-generated negative text embeddings. Can be used to easily tweak text inputs, *e.g.* prompt
-                weighting. If not provided, negative_prompt_embeds will be generated from `negative_prompt` input
-                argument.'''})
+        default=None, metadata={"help": '''Pre-generated negative text embeddings. Can be used to easily tweak text inputs, *e.g.* prompt weighting. 
+            If not provided, negative_prompt_embeds will be generated from `negative_prompt` input argument.'''})
 
 
     output_type: Optional[str] = field(
