@@ -36,7 +36,6 @@ from diffusers.utils.import_utils import is_xformers_available
 
 import copy
 import sys
-import evaluate
 from itertools import chain
 # from transformers import (
 #     Trainer,
@@ -47,13 +46,16 @@ from copy import deepcopy
 # from transformers.utils import send_example_telemetry
 # from transformers.trainer_utils import get_last_checkpoint
 
-from lmflow.datasets.dataset import Dataset
-from lmflow_diffsuion import FinetunerArguments
+# from lmflow.datasets.dataset import Dataset
+from lmflow_diffusion import FinetunerArguments
 
 
 logger = logging.getLogger(__name__)
 
 class Finetuner:
+    
+    def __int__(self):
+        pass
     
     def save_model_card(repo_id: str, images=None, base_model=str, dataset_name=str, repo_folder=None):
         img_str = ""
@@ -82,10 +84,6 @@ class Finetuner:
         with open(os.path.join(repo_folder, "README.md"), "w") as f:
             f.write(yaml + model_card)
 
-    
-    def __int__(self):
-        pass
-
     def compute_snr(timesteps):
         """
         Computes SNR as per https://github.com/TiankaiHang/Min-SNR-Diffusion-Training/blob/521b624bd70c67cee4bdf49225915f5945a872e3/guided_diffusion/gaussian_diffusion.py#L847-L849
@@ -112,7 +110,7 @@ class Finetuner:
     
     def tokenize_captions(examples, is_train=True):
         captions = []
-        for caption in examples[FinetunerArguments.caption_column]:
+        for caption in examples[args.caption_column]:
             if isinstance(caption, str):
                 captions.append(caption)
             elif isinstance(caption, (list, np.ndarray)):
@@ -120,7 +118,7 @@ class Finetuner:
                 captions.append(random.choice(caption) if is_train else caption[0])
             else:
                 raise ValueError(
-                    f"Caption column `{FinetunerArguments.caption_column}` should contain either strings or lists of strings."
+                    f"Caption column `{args.caption_column}` should contain either strings or lists of strings."
                 )
         inputs = tokenizer(
             captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
@@ -140,24 +138,24 @@ class Finetuner:
         return {"pixel_values": pixel_values, "input_ids": input_ids}
     
 
-class DiffusionFinetuner(FinetunerArguments,Finetuner):
+class DiffusionFinetuner(Finetuner):
 
     def __init__(self, *args, **kwargs):
         pass
 
-    def finetune(self):
-        logging_dir = os.path.join(FinetunerArguments.output_dir, FinetunerArguments.logging_dir)
+    def finetune(self, args: FinetunerArguments):
+        logging_dir = os.path.join(args.output_dir, args.logging_dir)
 
-        accelerator_project_config = ProjectConfiguration(total_limit=FinetunerArguments.checkpoints_total_limit)
+        accelerator_project_config = ProjectConfiguration(total_limit=args.checkpoints_total_limit)
 
         accelerator = Accelerator(
-            gradient_accumulation_steps=FinetunerArguments.gradient_accumulation_steps,
-            mixed_precision=FinetunerArguments.mixed_precision,
-            log_with=FinetunerArguments.report_to,
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
+            mixed_precision=args.mixed_precision,
+            log_with=args.report_to,
             logging_dir=logging_dir,
             project_config=accelerator_project_config,
         )
-        if FinetunerArguments.report_to == "wandb":
+        if args.report_to == "wandb":
             if not is_wandb_available():
                 raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
             import wandb
@@ -179,29 +177,29 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
             diffusers.utils.logging.set_verbosity_error()
 
         # If passed along, set the training seed now.
-        if FinetunerArguments.seed is not None:
-            set_seed(FinetunerArguments.seed)
+        if args.seed is not None:
+            set_seed(args.seed)
 
         # Handle the repository creation
         if accelerator.is_main_process:
-            if FinetunerArguments.output_dir is not None:
-                os.makedirs(FinetunerArguments.output_dir, exist_ok=True)
+            if args.output_dir is not None:
+                os.makedirs(args.output_dir, exist_ok=True)
 
-            if FinetunerArguments.push_to_hub:
+            if args.push_to_hub:
                 repo_id = create_repo(
-                    repo_id=FinetunerArguments.hub_model_id or Path(FinetunerArguments.output_dir).name, exist_ok=True, token=FinetunerArguments.hub_token
+                    repo_id=args.hub_model_id or Path(args.output_dir).name, exist_ok=True, token=args.hub_token
                 ).repo_id
         # Load scheduler, tokenizer and models.
-        noise_scheduler = DDPMScheduler.from_pretrained(FinetunerArguments.pretrained_model_name_or_path, subfolder="scheduler")
+        noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
         tokenizer = CLIPTokenizer.from_pretrained(
-            FinetunerArguments.pretrained_model_name_or_path, subfolder="tokenizer", revision=FinetunerArguments.revision
+            args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision
         )
         text_encoder = CLIPTextModel.from_pretrained(
-            FinetunerArguments.pretrained_model_name_or_path, subfolder="text_encoder", revision=FinetunerArguments.revision
+            args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
         )
-        vae = AutoencoderKL.from_pretrained(FinetunerArguments.pretrained_model_name_or_path, subfolder="vae", revision=FinetunerArguments.revision)
+        vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision)
         unet = UNet2DConditionModel.from_pretrained(
-            FinetunerArguments.pretrained_model_name_or_path, subfolder="unet", revision=FinetunerArguments.revision
+            args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
         )
         # freeze parameters of models to save more memory
         unet.requires_grad_(False)
@@ -252,7 +250,7 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
 
         unet.set_attn_processor(lora_attn_procs)
 
-        if FinetunerArguments.enable_xformers_memory_efficient_attention:
+        if args.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
                 import xformers
 
@@ -269,16 +267,16 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
 
         # Enable TF32 for faster training on Ampere GPUs,
         # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
-        if FinetunerArguments.allow_tf32:
+        if args.allow_tf32:
             torch.backends.cuda.matmul.allow_tf32 = True
 
-        if FinetunerArguments.scale_lr:
-            FinetunerArguments.learning_rate = (
-                FinetunerArguments.learning_rate * FinetunerArguments.gradient_accumulation_steps * FinetunerArguments.train_batch_size * accelerator.num_processes
+        if args.scale_lr:
+            args.learning_rate = (
+                args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
             )
 
         # Initialize the optimizer
-        if FinetunerArguments.use_8bit_adam:
+        if args.use_8bit_adam:
             try:
                 import bitsandbytes as bnb
             except ImportError:
@@ -292,10 +290,10 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
 
         optimizer = optimizer_cls(
             lora_layers.parameters(),
-            lr=FinetunerArguments.learning_rate,
-            betas=(FinetunerArguments.adam_beta1, FinetunerArguments.adam_beta2),
-            weight_decay=FinetunerArguments.adam_weight_decay,
-            eps=FinetunerArguments.adam_epsilon,
+            lr=args.learning_rate,
+            betas=(args.adam_beta1, args.adam_beta2),
+            weight_decay=args.adam_weight_decay,
+            eps=args.adam_epsilon,
         )
 
         # Get the datasets: you can either provide your own training and evaluation files (see below)
@@ -303,21 +301,21 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
 
         # In distributed training, the load_dataset function guarantees that only one local process can concurrently
         # download the dataset.
-        if FinetunerArguments.dataset_name is not None:
+        if args.dataset_name is not None:
             # Downloading and loading a dataset from the hub.
             dataset = load_dataset(
-                FinetunerArguments.dataset_name,
-                FinetunerArguments.dataset_config_name,
-                cache_dir=FinetunerArguments.cache_dir,
+                args.dataset_name,
+                args.dataset_config_name,
+                cache_dir=args.cache_dir,
             )
         else:
             data_files = {}
-            if FinetunerArguments.train_data_dir is not None:
-                data_files["train"] = os.path.join(FinetunerArguments.train_data_dir, "**")
+            if args.train_data_dir is not None:
+                data_files["train"] = os.path.join(args.train_data_dir, "**")
             dataset = load_dataset(
                 "imagefolder",
                 data_files=data_files,
-                cache_dir=FinetunerArguments.cache_dir,
+                cache_dir=args.cache_dir,
             )
             # See more about loading custom images at
             # https://huggingface.co/docs/datasets/v2.4.0/en/image_load#imagefolder
@@ -327,22 +325,22 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
         column_names = dataset["train"].column_names
 
         # 6. Get the column names for input/target.
-        dataset_columns = DATASET_NAME_MAPPING.get(FinetunerArguments.dataset_name, None)
-        if FinetunerArguments.image_column is None:
+        dataset_columns = DATASET_NAME_MAPPING.get(args.dataset_name, None)
+        if args.image_column is None:
             image_column = dataset_columns[0] if dataset_columns is not None else column_names[0]
         else:
-            image_column = FinetunerArguments.image_column
+            image_column = args.image_column
             if image_column not in column_names:
                 raise ValueError(
-                    f"--image_column' value '{FinetunerArguments.image_column}' needs to be one of: {', '.join(column_names)}"
+                    f"--image_column' value '{args.image_column}' needs to be one of: {', '.join(column_names)}"
                 )
-        if FinetunerArguments.caption_column is None:
+        if args.caption_column is None:
             caption_column = dataset_columns[1] if dataset_columns is not None else column_names[1]
         else:
-            caption_column = FinetunerArguments.caption_column
+            caption_column = args.caption_column
             if caption_column not in column_names:
                 raise ValueError(
-                    f"--caption_column' value '{FinetunerArguments.caption_column}' needs to be one of: {', '.join(column_names)}"
+                    f"--caption_column' value '{args.caption_column}' needs to be one of: {', '.join(column_names)}"
                 )
 
         # Preprocessing the datasets.
@@ -351,17 +349,17 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
         # Preprocessing the datasets.
         train_transforms = transforms.Compose(
             [
-                transforms.Resize(FinetunerArguments.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-                transforms.CenterCrop(FinetunerArguments.resolution) if FinetunerArguments.center_crop else transforms.RandomCrop(FinetunerArguments.resolution),
-                transforms.RandomHorizontalFlip() if FinetunerArguments.random_flip else transforms.Lambda(lambda x: x),
+                transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.CenterCrop(args.resolution) if args.center_crop else transforms.RandomCrop(args.resolution),
+                transforms.RandomHorizontalFlip() if args.random_flip else transforms.Lambda(lambda x: x),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
 
         with accelerator.main_process_first():
-            if FinetunerArguments.max_train_samples is not None:
-                dataset["train"] = dataset["train"].shuffle(seed=FinetunerArguments.seed).select(range(FinetunerArguments.max_train_samples))
+            if args.max_train_samples is not None:
+                dataset["train"] = dataset["train"].shuffle(seed=args.seed).select(range(args.max_train_samples))
             # Set the training transforms
             train_dataset = dataset["train"].with_transform(preprocess_train)
 
@@ -370,22 +368,22 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
             train_dataset,
             shuffle=True,
             collate_fn=collate_fn,
-            batch_size=FinetunerArguments.train_batch_size,
-            num_workers=FinetunerArguments.dataloader_num_workers,
+            batch_size=args.train_batch_size,
+            num_workers=args.dataloader_num_workers,
         )
 
         # Scheduler and math around the number of training steps.
         overrode_max_train_steps = False
-        num_update_steps_per_epoch = math.ceil(len(train_dataloader) / FinetunerArguments.gradient_accumulation_steps)
-        if FinetunerArguments.max_train_steps is None:
-            FinetunerArguments.max_train_steps = FinetunerArguments.num_train_epochs * num_update_steps_per_epoch
+        num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+        if args.max_train_steps is None:
+            args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
             overrode_max_train_steps = True
 
         lr_scheduler = get_scheduler(
-            FinetunerArguments.lr_scheduler,
+            args.lr_scheduler,
             optimizer=optimizer,
-            num_warmup_steps=FinetunerArguments.lr_warmup_steps * FinetunerArguments.gradient_accumulation_steps,
-            num_training_steps=FinetunerArguments.max_train_steps * FinetunerArguments.gradient_accumulation_steps,
+            num_warmup_steps=args.lr_warmup_steps * args.gradient_accumulation_steps,
+            num_training_steps=args.max_train_steps * args.gradient_accumulation_steps,
         )
 
         # Prepare everything with our `accelerator`.
@@ -394,11 +392,11 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
         )
 
         # We need to recalculate our total training steps as the size of the training dataloader may have changed.
-        num_update_steps_per_epoch = math.ceil(len(train_dataloader) / FinetunerArguments.gradient_accumulation_steps)
+        num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
         if overrode_max_train_steps:
-            FinetunerArguments.max_train_steps = FinetunerArguments.num_train_epochs * num_update_steps_per_epoch
+            args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         # Afterwards we recalculate our number of training epochs
-        FinetunerArguments.num_train_epochs = math.ceil(FinetunerArguments.max_train_steps / num_update_steps_per_epoch)
+        args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
         # We need to initialize the trackers we use, and also store our configuration.
         # The trackers initializes automatically on the main process.
@@ -406,54 +404,54 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
             accelerator.init_trackers("text2image-fine-tune", config=vars(args))
 
         # Train!
-        total_batch_size = FinetunerArguments.train_batch_size * accelerator.num_processes * FinetunerArguments.gradient_accumulation_steps
+        total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
         logger.info("***** Running training *****")
         logger.info(f"  Num examples = {len(train_dataset)}")
-        logger.info(f"  Num Epochs = {FinetunerArguments.num_train_epochs}")
-        logger.info(f"  Instantaneous batch size per device = {FinetunerArguments.train_batch_size}")
+        logger.info(f"  Num Epochs = {args.num_train_epochs}")
+        logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
         logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
-        logger.info(f"  Gradient Accumulation steps = {FinetunerArguments.gradient_accumulation_steps}")
-        logger.info(f"  Total optimization steps = {FinetunerArguments.max_train_steps}")
+        logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
+        logger.info(f"  Total optimization steps = {args.max_train_steps}")
         global_step = 0
         first_epoch = 0
 
         # Potentially load in the weights and states from a previous save
-        if FinetunerArguments.resume_from_checkpoint:
-            if FinetunerArguments.resume_from_checkpoint != "latest":
-                path = os.path.basename(FinetunerArguments.resume_from_checkpoint)
+        if args.resume_from_checkpoint:
+            if args.resume_from_checkpoint != "latest":
+                path = os.path.basename(args.resume_from_checkpoint)
             else:
                 # Get the most recent checkpoint
-                dirs = os.listdir(FinetunerArguments.output_dir)
+                dirs = os.listdir(args.output_dir)
                 dirs = [d for d in dirs if d.startswith("checkpoint")]
                 dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
                 path = dirs[-1] if len(dirs) > 0 else None
 
             if path is None:
                 accelerator.print(
-                    f"Checkpoint '{FinetunerArguments.resume_from_checkpoint}' does not exist. Starting a new training run."
+                    f"Checkpoint '{args.resume_from_checkpoint}' does not exist. Starting a new training run."
                 )
-                FinetunerArguments.resume_from_checkpoint = None
+                args.resume_from_checkpoint = None
             else:
                 accelerator.print(f"Resuming from checkpoint {path}")
-                accelerator.load_state(os.path.join(FinetunerArguments.output_dir, path))
+                accelerator.load_state(os.path.join(args.output_dir, path))
                 global_step = int(path.split("-")[1])
 
-                resume_global_step = global_step * FinetunerArguments.gradient_accumulation_steps
+                resume_global_step = global_step * args.gradient_accumulation_steps
                 first_epoch = global_step // num_update_steps_per_epoch
-                resume_step = resume_global_step % (num_update_steps_per_epoch * FinetunerArguments.gradient_accumulation_steps)
+                resume_step = resume_global_step % (num_update_steps_per_epoch * args.gradient_accumulation_steps)
 
         # Only show the progress bar once on each machine.
-        progress_bar = tqdm(range(global_step, FinetunerArguments.max_train_steps), disable=not accelerator.is_local_main_process)
+        progress_bar = tqdm(range(global_step, args.max_train_steps), disable=not accelerator.is_local_main_process)
         progress_bar.set_description("Steps")
 
-        for epoch in range(first_epoch, FinetunerArguments.num_train_epochs):
+        for epoch in range(first_epoch, args.num_train_epochs):
             unet.train()
             train_loss = 0.0
             for step, batch in enumerate(train_dataloader):
                 # Skip steps until we reach the resumed step
-                if FinetunerArguments.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
-                    if step % FinetunerArguments.gradient_accumulation_steps == 0:
+                if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
+                    if step % args.gradient_accumulation_steps == 0:
                         progress_bar.update(1)
                     continue
 
@@ -464,9 +462,9 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
 
                     # Sample noise that we'll add to the latents
                     noise = torch.randn_like(latents)
-                    if FinetunerArguments.noise_offset:
+                    if args.noise_offset:
                         # https://www.crosslabs.org//blog/diffusion-with-offset-noise
-                        noise += FinetunerArguments.noise_offset * torch.randn(
+                        noise += args.noise_offset * torch.randn(
                             (latents.shape[0], latents.shape[1], 1, 1), device=latents.device
                         )
 
@@ -493,7 +491,7 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
                     # Predict the noise residual and compute loss
                     model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
 
-                    if FinetunerArguments.snr_gamma is None:
+                    if args.snr_gamma is None:
                         loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
                     else:
                         # Compute loss-weights as per Section 3.4 of https://arxiv.org/abs/2303.09556.
@@ -501,7 +499,7 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
                         # This is discussed in Section 4.2 of the same paper.
                         snr = compute_snr(timesteps)
                         mse_loss_weights = (
-                            torch.stack([snr, FinetunerArguments.snr_gamma * torch.ones_like(timesteps)], dim=1).min(dim=1)[0] / snr
+                            torch.stack([snr, args.snr_gamma * torch.ones_like(timesteps)], dim=1).min(dim=1)[0] / snr
                         )
                         # We first calculate the original loss. Then we mean over the non-batch dimensions and
                         # rebalance the sample-wise losses with their respective loss weights.
@@ -511,14 +509,14 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
                         loss = loss.mean()
 
                     # Gather the losses across all processes for logging (if we use distributed training).
-                    avg_loss = accelerator.gather(loss.repeat(FinetunerArguments.train_batch_size)).mean()
-                    train_loss += avg_loss.item() / FinetunerArguments.gradient_accumulation_steps
+                    avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
+                    train_loss += avg_loss.item() / args.gradient_accumulation_steps
 
                     # Backpropagate
                     accelerator.backward(loss)
                     if accelerator.sync_gradients:
                         params_to_clip = lora_layers.parameters()
-                        accelerator.clip_grad_norm_(params_to_clip, FinetunerArguments.max_grad_norm)
+                        accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
                     optimizer.step()
                     lr_scheduler.step()
                     optimizer.zero_grad()
@@ -530,40 +528,40 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
                     accelerator.log({"train_loss": train_loss}, step=global_step)
                     train_loss = 0.0
 
-                    if global_step % FinetunerArguments.checkpointing_steps == 0:
+                    if global_step % args.checkpointing_steps == 0:
                         if accelerator.is_main_process:
-                            save_path = os.path.join(FinetunerArguments.output_dir, f"checkpoint-{global_step}")
+                            save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                             accelerator.save_state(save_path)
                             logger.info(f"Saved state to {save_path}")
 
                 logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
                 progress_bar.set_postfix(**logs)
 
-                if global_step >= FinetunerArguments.max_train_steps:
+                if global_step >= args.max_train_steps:
                     break
 
             if accelerator.is_main_process:
-                if FinetunerArguments.validation_prompt is not None and epoch % FinetunerArguments.validation_epochs == 0:
+                if args.validation_prompt is not None and epoch % args.validation_epochs == 0:
                     logger.info(
-                        f"Running validation... \n Generating {FinetunerArguments.num_validation_images} images with prompt:"
-                        f" {FinetunerArguments.validation_prompt}."
+                        f"Running validation... \n Generating {args.num_validation_images} images with prompt:"
+                        f" {args.validation_prompt}."
                     )
                     # create pipeline
                     pipeline = DiffusionPipeline.from_pretrained(
-                        FinetunerArguments.pretrained_model_name_or_path,
+                        args.pretrained_model_name_or_path,
                         unet=accelerator.unwrap_model(unet),
-                        revision=FinetunerArguments.revision,
+                        revision=args.revision,
                         torch_dtype=weight_dtype,
                     )
                     pipeline = pipeline.to(accelerator.device)
                     pipeline.set_progress_bar_config(disable=True)
 
                     # run inference
-                    generator = torch.Generator(device=accelerator.device).manual_seed(FinetunerArguments.seed)
+                    generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
                     images = []
-                    for _ in range(FinetunerArguments.num_validation_images):
+                    for _ in range(args.num_validation_images):
                         images.append(
-                            pipeline(FinetunerArguments.validation_prompt, num_inference_steps=30, generator=generator).images[0]
+                            pipeline(args.validation_prompt, num_inference_steps=30, generator=generator).images[0]
                         )
 
                     for tracker in accelerator.trackers:
@@ -574,7 +572,7 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
                             tracker.log(
                                 {
                                     "validation": [
-                                        wandb.Image(image, caption=f"{i}: {FinetunerArguments.validation_prompt}")
+                                        wandb.Image(image, caption=f"{i}: {args.validation_prompt}")
                                         for i, image in enumerate(images)
                                     ]
                                 }
@@ -587,19 +585,19 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
         accelerator.wait_for_everyone()
         if accelerator.is_main_process:
             unet = unet.to(torch.float32)
-            unet.save_attn_procs(FinetunerArguments.output_dir)
+            unet.save_attn_procs(args.output_dir)
 
-            if FinetunerArguments.push_to_hub:
+            if args.push_to_hub:
                 save_model_card(
                     repo_id,
                     images=images,
-                    base_model=FinetunerArguments.pretrained_model_name_or_path,
-                    dataset_name=FinetunerArguments.dataset_name,
-                    repo_folder=FinetunerArguments.output_dir,
+                    base_model=args.pretrained_model_name_or_path,
+                    dataset_name=args.dataset_name,
+                    repo_folder=args.output_dir,
                 )
                 upload_folder(
                     repo_id=repo_id,
-                    folder_path=FinetunerArguments.output_dir,
+                    folder_path=args.output_dir,
                     commit_message="End of training",
                     ignore_patterns=["step_*", "epoch_*"],
                 )
@@ -607,18 +605,18 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
         # Final inference
         # Load previous pipeline
         pipeline = DiffusionPipeline.from_pretrained(
-            FinetunerArguments.pretrained_model_name_or_path, revision=FinetunerArguments.revision, torch_dtype=weight_dtype
+            args.pretrained_model_name_or_path, revision=args.revision, torch_dtype=weight_dtype
         )
         pipeline = pipeline.to(accelerator.device)
 
         # load attention processors
-        pipeline.unet.load_attn_procs(FinetunerArguments.output_dir)
+        pipeline.unet.load_attn_procs(args.output_dir)
 
         # run inference
-        generator = torch.Generator(device=accelerator.device).manual_seed(FinetunerArguments.seed)
+        generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
         images = []
-        for _ in range(FinetunerArguments.num_validation_images):
-            images.append(pipeline(FinetunerArguments.validation_prompt, num_inference_steps=30, generator=generator).images[0])
+        for _ in range(args.num_validation_images):
+            images.append(pipeline(args.validation_prompt, num_inference_steps=30, generator=generator).images[0])
 
         if accelerator.is_main_process:
             for tracker in accelerator.trackers:
@@ -629,7 +627,7 @@ class DiffusionFinetuner(FinetunerArguments,Finetuner):
                     tracker.log(
                         {
                             "test": [
-                                wandb.Image(image, caption=f"{i}: {FinetunerArguments.validation_prompt}")
+                                wandb.Image(image, caption=f"{i}: {args.validation_prompt}")
                                 for i, image in enumerate(images)
                             ]
                         }
