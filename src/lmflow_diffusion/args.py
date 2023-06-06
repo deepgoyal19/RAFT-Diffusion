@@ -168,6 +168,9 @@ class FinetunerArguments:
     eval_dataset_path: Optional[str] = field(
         default=None, metadata={"help": "The path of the eval dataset to use."})
     
+    tracker_project_name: str = field(
+        default="text2image-fine-tune", metadata={"help": "The `project_name` argument passed to Accelerator.init_trackers for"
+            " more information see https://huggingface.co/docs/accelerate/v0.17.0/en/package_reference/accelerator#accelerate.Accelerator"})
 
 @dataclass 
 class ModelArguments:
