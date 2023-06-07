@@ -172,6 +172,28 @@ class FinetunerArguments:
         default="text2image-fine-tune", metadata={"help": "The `project_name` argument passed to Accelerator.init_trackers for"
             " more information see https://huggingface.co/docs/accelerate/v0.17.0/en/package_reference/accelerator#accelerate.Accelerator"})
 
+    checkpoints_total_limit: Optional[int] = field(
+        default= None, metadata= {"help":"Max number of checkpoints to store. Passed as `total_limit` to the `Accelerator` `ProjectConfiguration`."
+            " See Accelerator::save_state https://huggingface.co/docs/accelerate/package_reference/accelerator#accelerate.Accelerator.save_state"
+            " for more docs"})
+    
+    report_to: str = field(
+        default= "tensorboard", metadata= {"help": 'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
+            ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'})
+    
+    validation_prompts: Optional[str] = field(
+        default= None, metadata= {"help": "A set of prompts evaluated every `validation_epochs` and logged to `report_to`."})
+    
+    non_ema_revision: Optional[str]= field(
+        default=None, metadata= {"help": "Revision of pretrained non-ema model identifier. Must be a branch, tag or git identifier of the local or"
+            " remote repository specified with --pretrained_model_name_or_path."})
+    
+    enable_xformers_memory_efficient_attention: bool= field(
+        default= False, metadata={"help": "Whether or not to use xformers." })
+    
+    use_ema: bool= field(
+        default=False, metadata={"help": "Whether to use EMA model."})
+    
 @dataclass 
 class ModelArguments:
 
