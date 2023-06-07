@@ -33,7 +33,7 @@ from diffusers.models.attention_processor import LoRAAttnProcessor
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version, is_wandb_available, deprecate
 from diffusers.utils.import_utils import is_xformers_available
-
+from lmflow.pipeline.base_tuner import BaseTuner
 import copy
 import sys
 from itertools import chain
@@ -50,10 +50,13 @@ from lmflow_diffusion.args import FinetunerArguments
 
 logger = logging.getLogger(__name__)
 
-class Finetuner:
+class Finetuner(BaseTuner):
     
-    def __int__(self):
-        pass
+    def __init__(self,model_args, data_args, finetuner_args, *args, **kwargs):
+
+        self.model_args = model_args
+        self.data_args = data_args
+        self.finetuner_args = finetuner_args
     
     def save_model_card(repo_id: str, images=None, base_model=str, dataset_name=str, repo_folder=None):
         img_str = ""
@@ -62,23 +65,23 @@ class Finetuner:
             img_str += f"![img_{i}](./image_{i}.png)\n"
 
         yaml = f"""
-    ---
-    license: creativeml-openrail-m
-    base_model: {base_model}
-    tags:
-    - stable-diffusion
-    - stable-diffusion-diffusers
-    - text-to-image
-    - diffusers
-    - lora
-    inference: true
-    ---
+            ---
+            license: creativeml-openrail-m
+            base_model: {base_model}
+            tags:
+            - stable-diffusion
+            - stable-diffusion-diffusers
+            - text-to-image
+            - diffusers
+            - lora
+            inference: true
+            ---
         """
         model_card = f"""
-    # LoRA text2image fine-tuning - {repo_id}
-    These are LoRA adaption weights for {base_model}. The weights were fine-tuned on the {dataset_name} dataset. You can find some example images in the following. \n
-    {img_str}
-    """
+            # LoRA text2image fine-tuning - {repo_id}
+            These are LoRA adaption weights for {base_model}. The weights were fine-tuned on the {dataset_name} dataset. You can find some example images in the following. \n
+            {img_str}
+        """
         with open(os.path.join(repo_folder, "README.md"), "w") as f:
             f.write(yaml + model_card)
 
@@ -108,7 +111,7 @@ class Finetuner:
     
     def tokenize_captions(examples, is_train=True):
         captions = []
-        for caption in examples[finetuner_args.caption_column]:
+        for caption in examples[self.finetuner_args.caption_column]:
             if isinstance(caption, str):
                 captions.append(caption)
             elif isinstance(caption, (list, np.ndarray)):
@@ -116,7 +119,7 @@ class Finetuner:
                 captions.append(random.choice(caption) if is_train else caption[0])
             else:
                 raise ValueError(
-                    f"Caption column `{finetuner_args.caption_column}` should contain either strings or lists of strings."
+                    f"Caption column `{self.finetuner_args.caption_column}` should contain either strings or lists of strings."
                 )
         inputs = tokenizer(
             captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
@@ -240,7 +243,7 @@ class DiffusionFinetuner(Finetuner):
         
         self.finetuner_args = finetuner_args   
 
-        
+    
 
     def finetune(self):
         
@@ -251,7 +254,7 @@ class DiffusionFinetuner(Finetuner):
             "lambdalabs/pokemon-blip-captions": ("image", "text"),
         }
 
-        if not model_args.use_lora:
+        if not self.model_args.use_lora:
                 if finetuner_args.non_ema_revision is not None:
                     deprecate(
                         "non_ema_revision!=None",
@@ -274,7 +277,7 @@ class DiffusionFinetuner(Finetuner):
             project_config=accelerator_project_config,
         )
 
-        if model_args.use_lora:
+        if self.model_args.use_lora:
             if finetuner_args.report_to == "wandb":
                 if not is_wandb_available():
                     raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
@@ -316,7 +319,7 @@ class DiffusionFinetuner(Finetuner):
             finetuner_args.pretrained_model_name_or_path, subfolder="tokenizer", revision=finetuner_args.revision
         )
 
-        if model_args.use_lora:
+        if self.model_args.use_lora:
             text_encoder = CLIPTextModel.from_pretrained(
                 finetuner_args.pretrained_model_name_or_path, subfolder="text_encoder", revision=finetuner_args.revision
             )
@@ -342,7 +345,7 @@ class DiffusionFinetuner(Finetuner):
 
 
 
-        if model_args.use_lora:
+        if self.model_args.use_lora:
             unet.requires_grad_(False)
 
             # For mixed precision training we cast the text_encoder and vae weights to half-precision
@@ -409,7 +412,7 @@ class DiffusionFinetuner(Finetuner):
             else:
                 raise ValueError("xformers is not available. Make sure it is installed correctly")
 
-        if model_args.use_lora:
+        if self.model_args.use_lora:
 
             lora_layers = AttnProcsLayers(unet.attn_processors)
 
@@ -581,7 +584,7 @@ class DiffusionFinetuner(Finetuner):
         
         
         if accelerator.is_main_process:
-            if model_args.use_lora:
+            if self.model_args.use_lora:
                 accelerator.init_trackers("text2image-fine-tune", config=vars(args))
             else:
                 tracker_config = dict(vars(args))
@@ -732,20 +735,20 @@ class DiffusionFinetuner(Finetuner):
 
             if accelerator.is_main_process:
                 if finetuner_args.validation_prompts is not None and epoch % finetuner_args.validation_epochs == 0:  
-                    if model_args.use_lora:
-                        logger.info(
-                            f"Running validation... \n Generating {finetuner_args.num_validation_images} images with prompt:"
-                            f" {finetuner_args.validation_prompt}."
-                        )
-                        # create pipeline
-                        pipeline = DiffusionPipeline.from_pretrained(
-                            finetuner_args.pretrained_model_name_or_path,
-                            unet=accelerator.unwrap_model(unet),
-                            revision=finetuner_args.revision,
-                            torch_dtype=weight_dtype,
-                        )
-                        pipeline = pipeline.to(accelerator.device)
-                        pipeline.set_progress_bar_config(disable=True)
+                    if self.model_args.use_lora:
+                          logger.info(
+                                f"Running validation... \n Generating {finetuner_args.num_validation_images} images with prompt:"
+                                f" {finetuner_args.validation_prompt}."
+                            )
+                            # create pipeline
+                            pipeline = DiffusionPipeline.from_pretrained(
+                                finetuner_args.pretrained_model_name_or_path,
+                                unet=accelerator.unwrap_model(unet),
+                                revision=finetuner_args.revision,
+                                torch_dtype=weight_dtype,
+                            )
+                            pipeline = pipeline.to(accelerator.device)
+                            pipeline.set_progress_bar_config(disable=True)
 
                         # run inference
                         generator = torch.Generator(device=accelerator.device).manual_seed(finetuner_args.seed)
@@ -793,7 +796,7 @@ class DiffusionFinetuner(Finetuner):
         # Create the pipeline using the trained modules and save it.
         accelerator.wait_for_everyone()
         if accelerator.is_main_process:
-            if model_args.use_lora:
+            if self.model_args.use_lora:
                 unet = unet.to(torch.float32)
                 unet.save_attn_procs(finetuner_args.output_dir)
 
@@ -835,7 +838,7 @@ class DiffusionFinetuner(Finetuner):
                         ignore_patterns=["step_*", "epoch_*"],
                     )
                
-        if model_args.use_lora: 
+        if self.model_args.use_lora: 
                 # Final inference
                 # Load previous pipeline
                 pipeline = DiffusionPipeline.from_pretrained(
