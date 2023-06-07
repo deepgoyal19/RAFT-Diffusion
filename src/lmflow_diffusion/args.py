@@ -179,7 +179,7 @@ class ModelArguments:
         default=None, metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models."})
 
     use_lora: bool = field(
-        default=False, metadata={"help": "Whether to lora."})
+        default=False, metadata={"help": "Whether to use lora."})
     
     torch_dtype: Optional[str] = field(default=None,metadata={"help": ("Override the default `torch.dtype` and load the model under this dtype. If `auto` is passed,the "
         "dtype will be automatically derived from the model's weights."), "choices": ["auto", "bfloat16", "float16", "float32"]})

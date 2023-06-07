@@ -186,14 +186,14 @@ class Finetuner:
         torch.cuda.empty_cache()
     
     def save_model_hook(models, weights, output_dir):
-    if finetuner_args.use_ema:
-        ema_unet.save_pretrained(os.path.join(output_dir, "unet_ema"))
+        if finetuner_args.use_ema:
+            ema_unet.save_pretrained(os.path.join(output_dir, "unet_ema"))
 
-    for i, model in enumerate(models):
-        model.save_pretrained(os.path.join(output_dir, "unet"))
+        for i, model in enumerate(models):
+            model.save_pretrained(os.path.join(output_dir, "unet"))
 
-        # make sure to pop weight so that corresponding model is not saved again
-        weights.pop()
+            # make sure to pop weight so that corresponding model is not saved again
+            weights.pop()
 
     def load_model_hook(models, input_dir):
         if finetuner_args.use_ema:
@@ -236,7 +236,7 @@ class DiffusionFinetuner(Finetuner):
 
     """   
 
-    def __init__(self, finetuner_args, *args, **kwargs):
+    def __init__(self, finetuner_args, model_args, *args, **kwargs):
         
         self.finetuner_args = finetuner_args   
 
@@ -245,12 +245,13 @@ class DiffusionFinetuner(Finetuner):
     def finetune(self):
         
         finetuner_args = self.finetuner_args
+        model_args= self.model_args
         
         DATASET_NAME_MAPPING = {
             "lambdalabs/pokemon-blip-captions": ("image", "text"),
         }
 
-        if !use_lora:
+        if not model_args.use_lora:
                 if finetuner_args.non_ema_revision is not None:
                     deprecate(
                         "non_ema_revision!=None",
@@ -273,7 +274,7 @@ class DiffusionFinetuner(Finetuner):
             project_config=accelerator_project_config,
         )
 
-        if use_lora:
+        if model_args.use_lora:
             if finetuner_args.report_to == "wandb":
                 if not is_wandb_available():
                     raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
@@ -315,7 +316,7 @@ class DiffusionFinetuner(Finetuner):
             finetuner_args.pretrained_model_name_or_path, subfolder="tokenizer", revision=finetuner_args.revision
         )
 
-        if use_lora:
+        if model_args.use_lora:
             text_encoder = CLIPTextModel.from_pretrained(
                 finetuner_args.pretrained_model_name_or_path, subfolder="text_encoder", revision=finetuner_args.revision
             )
@@ -341,7 +342,7 @@ class DiffusionFinetuner(Finetuner):
 
 
 
-        if use_lora:
+        if model_args.use_lora:
             unet.requires_grad_(False)
 
             # For mixed precision training we cast the text_encoder and vae weights to half-precision
@@ -408,7 +409,7 @@ class DiffusionFinetuner(Finetuner):
             else:
                 raise ValueError("xformers is not available. Make sure it is installed correctly")
 
-        if use_lora:
+        if model_args.use_lora:
 
             lora_layers = AttnProcsLayers(unet.attn_processors)
 
@@ -542,7 +543,7 @@ class DiffusionFinetuner(Finetuner):
             num_training_steps=finetuner_args.max_train_steps * finetuner_args.gradient_accumulation_steps,
         )
 
-        if use_lora: 
+        if model_args.use_lora: 
             # Prepare everything with our `accelerator`.
             lora_layers, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
                 lora_layers, optimizer, train_dataloader, lr_scheduler
@@ -580,7 +581,7 @@ class DiffusionFinetuner(Finetuner):
         
         
         if accelerator.is_main_process:
-            if use_lora:
+            if model_args.use_lora:
                 accelerator.init_trackers("text2image-fine-tune", config=vars(args))
             else:
                 tracker_config = dict(vars(args))
@@ -731,68 +732,68 @@ class DiffusionFinetuner(Finetuner):
 
             if accelerator.is_main_process:
                 if finetuner_args.validation_prompts is not None and epoch % finetuner_args.validation_epochs == 0:  
-                    if use_lora:
-                          logger.info(
-                                f"Running validation... \n Generating {finetuner_args.num_validation_images} images with prompt:"
-                                f" {finetuner_args.validation_prompt}."
-                            )
-                            # create pipeline
-                            pipeline = DiffusionPipeline.from_pretrained(
-                                finetuner_args.pretrained_model_name_or_path,
-                                unet=accelerator.unwrap_model(unet),
-                                revision=finetuner_args.revision,
-                                torch_dtype=weight_dtype,
-                            )
-                            pipeline = pipeline.to(accelerator.device)
-                            pipeline.set_progress_bar_config(disable=True)
+                    if model_args.use_lora:
+                        logger.info(
+                            f"Running validation... \n Generating {finetuner_args.num_validation_images} images with prompt:"
+                            f" {finetuner_args.validation_prompt}."
+                        )
+                        # create pipeline
+                        pipeline = DiffusionPipeline.from_pretrained(
+                            finetuner_args.pretrained_model_name_or_path,
+                            unet=accelerator.unwrap_model(unet),
+                            revision=finetuner_args.revision,
+                            torch_dtype=weight_dtype,
+                        )
+                        pipeline = pipeline.to(accelerator.device)
+                        pipeline.set_progress_bar_config(disable=True)
 
-                            # run inference
-                            generator = torch.Generator(device=accelerator.device).manual_seed(finetuner_args.seed)
-                            images = []
-                            for _ in range(finetuner_args.num_validation_images):
-                                images.append(
-                                    pipeline(finetuner_args.validation_prompt, num_inference_steps=30, generator=generator).images[0]
+                        # run inference
+                        generator = torch.Generator(device=accelerator.device).manual_seed(finetuner_args.seed)
+                        images = []
+                        for _ in range(finetuner_args.num_validation_images):
+                            images.append(
+                                pipeline(finetuner_args.validation_prompt, num_inference_steps=30, generator=generator).images[0]
+                            )
+
+                        for tracker in accelerator.trackers:
+                            if tracker.name == "tensorboard":
+                                np_images = np.stack([np.asarray(img) for img in images])
+                                tracker.writer.add_images("validation", np_images, epoch, dataformats="NHWC")
+                            if tracker.name == "wandb":
+                                tracker.log(
+                                    {
+                                        "validation": [
+                                            wandb.Image(image, caption=f"{i}: {finetuner_args.validation_prompt}")
+                                            for i, image in enumerate(images)
+                                        ]
+                                    }
                                 )
-
-                            for tracker in accelerator.trackers:
-                                if tracker.name == "tensorboard":
-                                    np_images = np.stack([np.asarray(img) for img in images])
-                                    tracker.writer.add_images("validation", np_images, epoch, dataformats="NHWC")
-                                if tracker.name == "wandb":
-                                    tracker.log(
-                                        {
-                                            "validation": [
-                                                wandb.Image(image, caption=f"{i}: {finetuner_args.validation_prompt}")
-                                                for i, image in enumerate(images)
-                                            ]
-                                        }
-                                    )
 
                             del pipeline
                             torch.cuda.empty_cache()
-                        else:
-                            if finetuner_args.use_ema:
-                                # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
-                                ema_unet.store(unet.parameters())
-                                ema_unet.copy_to(unet.parameters())
-                            log_validation(
-                                vae,
-                                text_encoder,
-                                tokenizer,
-                                unet,
-                                args,
-                                accelerator,
-                                weight_dtype,
-                                global_step,
-                            )
-                            if finetuner_args.use_ema:
-                                # Switch back to the original UNet parameters.
-                                ema_unet.restore(unet.parameters())
+                    else:
+                        if finetuner_args.use_ema:
+                            # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
+                            ema_unet.store(unet.parameters())
+                            ema_unet.copy_to(unet.parameters())
+                        log_validation(
+                            vae,
+                            text_encoder,
+                            tokenizer,
+                            unet,
+                            args,
+                            accelerator,
+                            weight_dtype,
+                            global_step,
+                        )
+                        if finetuner_args.use_ema:
+                            # Switch back to the original UNet parameters.
+                            ema_unet.restore(unet.parameters())
 
         # Create the pipeline using the trained modules and save it.
         accelerator.wait_for_everyone()
         if accelerator.is_main_process:
-            if use_lora:
+            if model_args.use_lora:
                 unet = unet.to(torch.float32)
                 unet.save_attn_procs(finetuner_args.output_dir)
 
@@ -834,7 +835,7 @@ class DiffusionFinetuner(Finetuner):
                         ignore_patterns=["step_*", "epoch_*"],
                     )
                
-        if use_lora: 
+        if model_args.use_lora: 
                 # Final inference
                 # Load previous pipeline
                 pipeline = DiffusionPipeline.from_pretrained(
