@@ -278,6 +278,14 @@ class DiffusionFinetuner(Finetuner):
 
         self.accelerator_project_config = ProjectConfiguration(total_limit=self.finetuner_args.checkpoints_total_limit)
 
+        Accelerator.device = torch.device(self.finetuner_args.accelerate_device)
+        Accelerator.num_processes = self.finetuner_args.accelerate_num_processes
+        Accelerator.process_index = self.finetuner_args.accelerate_process_index
+        Accelerator.sync_gradients = self.finetuner_args.accelerate_sync_gradients
+        Accelerator.use_distributed = self.finetuner_args.accelerate_use_distributed
+        Accelerator.accelerate_optimizer_step_was_skipped = self.finetuner_args.accelerate_optimizer_step_was_skipped
+        Accelerator.local_process_index = self.finetuner_args.accelerate_local_process_index
+
         self.accelerator = Accelerator(
             gradient_accumulation_steps=self.finetuner_args.gradient_accumulation_steps,
             mixed_precision=self.finetuner_args.mixed_precision,

@@ -204,6 +204,34 @@ class FinetunerArguments:
         default=500, metadata={"help":"Save a checkpoint of the training state every X updates. These checkpoints are only suitable for resuming"
             " training using `--resume_from_checkpoint`."})
     
+    accelerate_device: str = field(
+        default="cuda" if torch.cuda.is_available() else "cpu", metadata={"description": "The device to use."})
+    
+    accelerate_local_process_index: int = field(
+        default=0, metadata={"description": "The process index on the current machine."})
+    
+    # accelerate_mixed_precision: str = field(
+    #     default="no", metadata={"description": "The configured mixed precision mode."})
+    
+    accelerate_num_processes: int = field(
+        default=1, metadata={"description": "The total number of processes used for training."})
+    
+    accelerate_optimizer_step_was_skipped: bool = field(
+        default=False, metadata={"description": "Whether or not the optimizer update was skipped."})
+    
+    accelerate_process_index: int = field(
+        default=0, metadata={"description": "The overall index of the current process among all processes."})
+    
+    accelerate_sync_gradients: bool = field(
+        default=True, metadata={"description": "Whether the gradients are currently being synced."})
+    
+    accelerate_use_distributed: bool = field(
+        default=False, metadata={"description": "Whether the current configuration is for distributed training."})
+    
+    # distributed_type: DistributedType = field(
+    #     default=DistributedType.NONE,
+    #     metadata={"description": "The distributed training configuration."})
+    
 @dataclass 
 class ModelArguments:
 
