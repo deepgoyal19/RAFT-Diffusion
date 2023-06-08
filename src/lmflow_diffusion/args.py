@@ -198,7 +198,7 @@ class FinetunerArguments:
         default=1, metadata={"help": "The scale of noise offset"})
     
     input_perturbation: float= field(
-        default=0, metadata={"help": "The scale of input perturbation. Recommended 0.1."})    )
+        default=0, metadata={"help": "The scale of input perturbation. Recommended 0.1."})    
     
     checkpointing_steps: int= field(
         default=500, metadata={"help":"Save a checkpoint of the training state every X updates. These checkpoints are only suitable for resuming"
