@@ -245,7 +245,7 @@ class DiffusionFinetuner(Finetuner):
         if self.finetuner_args.seed is not None:
             set_seed(self.finetuner_args.seed)
 
-    def finetune(self, model, dataset):
+    def finetune(self, model):
         
         # model.unet = model.unet
         # model.vae = model.vae
@@ -416,7 +416,7 @@ class DiffusionFinetuner(Finetuner):
         # In distributed training, the load_dataset function guarantees that only one local process can concurrently
         # download the dataset.
 
-        '''
+        
         if self.finetuner_args.dataset_name is not None:
             # Downloading and loading a dataset from the hub.
             dataset = load_dataset(
@@ -493,7 +493,7 @@ class DiffusionFinetuner(Finetuner):
             num_workers=self.finetuner_args.dataloader_num_workers,
         )
 
-        '''
+        
         # Hanze comments: All the above dataset operation should be in the dataset.py to define a new class. train_dataloader = dataset.train_dataloader.
         # For save, resume, etc. We may use integrate them into model.py as more as possible. I have provided an example about to_device.
 
@@ -571,13 +571,14 @@ class DiffusionFinetuner(Finetuner):
 
         # Potentially load in the weights and states from a previous save
 
+
         self.finetuner_args.resume_from_checkpoint, global_step, first_epoch, resume_step= model.resume_from_path(
                                                             self.finetuner_args.resume_from_checkpoint, 
                                                             self.finetuner_args.output_dir,
                                                             self.finetuner_args.gradient_accumulation_steps,
-                                                            num_update_steps_per_epoch
+                                                            num_update_steps_per_epoch,
+                                                            self.accelerator
                                                         )   
-
 
         # Only show the progress bar once on each machine.
         progress_bar = tqdm(range(global_step, self.finetuner_args.max_train_steps), disable=not self.accelerator.is_local_main_process)
@@ -747,7 +748,7 @@ class DiffusionFinetuner(Finetuner):
         self.accelerator.wait_for_everyone()
         if self.accelerator.is_main_process:
             # save model
-            model.save(self.finetuner_args.output_dir)
+            model.save(self.finetuner_args.output_dir, self.accelerator)
             
             # Push model to hub
             if self.finetuner_args.push_to_hub:

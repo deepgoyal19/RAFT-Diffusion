@@ -127,14 +127,14 @@ class DiffusionModel:
         self.text_encoder.to(device, dtype=weight_dtype)
 
 
-    def save(self, output_dir):
+    def save(self, output_dir, accelerator):
 
         if self.model_args.use_lora:
             self.unet = self.unet.to(torch.float32)
             self.unet.save_attn_procs(output_dir)
         
         else:
-            self.unet = self.accelerator.unwrap_model(self.unet)
+            self.unet = accelerator.unwrap_model(self.unet)
             if self.model_args.use_ema:
                 self.ema_unet.copy_to(self.unet.parameters())
 
@@ -199,7 +199,7 @@ class DiffusionModel:
     def inference(self):
         pass
 
-    def resume_from_path(self, resume_from_checkpoint, output_dir, gradient_accumulation_steps, num_update_steps_per_epoch):
+    def resume_from_path(self, resume_from_checkpoint, output_dir, gradient_accumulation_steps, num_update_steps_per_epoch, accelerator):
         
         if resume_from_checkpoint:
             if resume_from_checkpoint != "latest":
@@ -212,7 +212,7 @@ class DiffusionModel:
                 path = dirs[-1] if len(dirs) > 0 else None
 
             if path is None:
-                self.accelerator.print(
+                accelerator.print(
                     f"Checkpoint '{resume_from_checkpoint}' does not exist. Starting a new training run."
                 )
 # Deepanshu Comment: Please do check the return values
@@ -223,8 +223,8 @@ class DiffusionModel:
                 return resume_from_checkpoint, global_step, first_epoch, resume_step
             
             else:
-                self.accelerator.print(f"Resuming from checkpoint {path}")
-                self.accelerator.load_state(os.path.join(output_dir, path))
+                accelerator.load_state(os.path.join(output_dir, path))
+                accelerator.print(f"Resuming from checkpoint {path}")
                 global_step = int(path.split("-")[1])
 
                 resume_global_step = global_step * gradient_accumulation_steps
