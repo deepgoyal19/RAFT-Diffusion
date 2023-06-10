@@ -120,3 +120,15 @@ class DiffusionModel:
             self.model_args.pretrained_model_name_or_path, subfolder="unet", revision=self.model_args.revision
             )
             self.ema_unet = EMAModel(self.ema_unet.parameters(), model_cls=UNet2DConditionModel, model_config=self.ema_unet.config)
+    
+    def to_device(self,device,weight_dtype):
+        self.unet.to(device, dtype=weight_dtype)
+        self.vae.to(device, dtype=weight_dtype)
+        self.text_encoder.to(device, dtype=weight_dtype)
+
+
+    def save(self):
+        pass
+
+    def resume_from_path(self):
+        pass

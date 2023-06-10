@@ -270,7 +270,7 @@ class DiffusionFinetuner(Finetuner):
         if self.finetuner_args.seed is not None:
             set_seed(self.finetuner_args.seed)
 
-    def finetune(self, model):
+    def finetune(self, model, dataset):
         
         unet = model.unet
         vae = model.vae
@@ -344,9 +344,7 @@ class DiffusionFinetuner(Finetuner):
                 weight_dtype = torch.bfloat16
 
             # Move unet, vae and text_encoder to device and cast to weight_dtype
-            unet.to(self.accelerator.device, dtype=weight_dtype)
-            vae.to(self.accelerator.device, dtype=weight_dtype)
-            text_encoder.to(self.accelerator.device, dtype=weight_dtype)
+            model.to_device(self.accelerator.device,weight_dtype)
 
             # now we will add new LoRA weights to the attention layers
             # It's important to realize here how many attention weights will be added and of which sizes
@@ -396,9 +394,7 @@ class DiffusionFinetuner(Finetuner):
                 raise ValueError("xformers is not available. Make sure it is installed correctly")
 
         if self.model_args.use_lora:
-
             lora_layers = AttnProcsLayers(unet.attn_processors)
-
         else:
             
             if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
@@ -447,6 +443,8 @@ class DiffusionFinetuner(Finetuner):
 
         # In distributed training, the load_dataset function guarantees that only one local process can concurrently
         # download the dataset.
+
+        '''
         if self.finetuner_args.dataset_name is not None:
             # Downloading and loading a dataset from the hub.
             dataset = load_dataset(
@@ -482,6 +480,8 @@ class DiffusionFinetuner(Finetuner):
                 )
         self.image_column=image_column
 
+        
+
         if self.finetuner_args.caption_column is None:
             caption_column = dataset_columns[1] if dataset_columns is not None else column_names[1]
         else:
@@ -502,6 +502,10 @@ class DiffusionFinetuner(Finetuner):
             ]
         )
 
+
+
+
+
         with self.accelerator.main_process_first():
             if self.finetuner_args.max_train_samples is not None:
                 dataset["train"] = dataset["train"].shuffle(seed=self.finetuner_args.seed).select(range(self.finetuner_args.max_train_samples))
@@ -516,6 +520,10 @@ class DiffusionFinetuner(Finetuner):
             batch_size=self.finetuner_args.train_batch_size,
             num_workers=self.finetuner_args.dataloader_num_workers,
         )
+
+        '''
+        # Hanze comments: All the above dataset operation should be in the dataset.py to define a new class. train_dataloader = dataset.train_dataloader.
+        # For save, resume, etc. We may use integrate them into model.py as more as possible. I have provided an example about to_device.
 
         # Scheduler and math around the number of training steps.
         overrode_max_train_steps = False
