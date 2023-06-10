@@ -18,12 +18,6 @@ import torch
 
 @dataclass
 class FinetunerArguments:
-
-    pretrained_model_name_or_path: Optional[str] = field(
-        default=None, metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models."})
-    
-    revision: Optional[str] = field(
-        default=None, metadata={"help": "Revision of pretrained model identifier from huggingface.co/models."})
     
     dataset_name: Optional[str] = field(
         default=None, metadata={
@@ -176,17 +170,11 @@ class FinetunerArguments:
         default= None, metadata= {"help":"Max number of checkpoints to store. Passed as `total_limit` to the `Accelerator` `ProjectConfiguration`."
             " See Accelerator::save_state https://huggingface.co/docs/accelerate/package_reference/accelerator#accelerate.Accelerator.save_state"
             " for more docs"})
-    
-    report_to: str = field(
-        default= "tensorboard", metadata= {"help": 'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
-            ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'})
+
     
     validation_prompts: Optional[str] = field(
         default= None, metadata= {"help": "A set of prompts evaluated every `validation_epochs` and logged to `report_to`."})
     
-    non_ema_revision: Optional[str]= field(
-        default=None, metadata= {"help": "Revision of pretrained non-ema model identifier. Must be a branch, tag or git identifier of the local or"
-            " remote repository specified with --pretrained_model_name_or_path."})
     
     enable_xformers_memory_efficient_attention: bool= field(
         default= False, metadata={"help": "Whether or not to use xformers." })
@@ -244,6 +232,19 @@ class ModelArguments:
     torch_dtype: Optional[str] = field(default=None,metadata={"help": ("Override the default `torch.dtype` and load the model under this dtype. If `auto` is passed,the "
         "dtype will be automatically derived from the model's weights."), "choices": ["auto", "bfloat16", "float16", "float32"]})
 
+    pretrained_model_name_or_path: Optional[str] = field(
+        default=None, metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models."})
+    
+    revision: Optional[str] = field(
+        default=None, metadata={"help": "Revision of pretrained model identifier from huggingface.co/models."})
+
+    non_ema_revision: Optional[str]= field(
+        default=None, metadata= {"help": "Revision of pretrained non-ema model identifier. Must be a branch, tag or git identifier of the local or"
+            " remote repository specified with --pretrained_model_name_or_path."})
+    
+    report_to: str = field(
+        default= "tensorboard", metadata= {"help": 'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
+            ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'})
 
 @dataclass
 class InferenceArguments:  
