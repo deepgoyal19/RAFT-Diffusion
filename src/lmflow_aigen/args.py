@@ -179,8 +179,6 @@ class FinetunerArguments:
     enable_xformers_memory_efficient_attention: bool= field(
         default= False, metadata={"help": "Whether or not to use xformers." })
     
-    use_ema: bool= field(
-        default=False, metadata={"help": "Whether to use EMA model."})
     
     noise_offset: float= field(
         default=1, metadata={"help": "The scale of noise offset"})
@@ -191,6 +189,10 @@ class FinetunerArguments:
     checkpointing_steps: int= field(
         default=500, metadata={"help":"Save a checkpoint of the training state every X updates. These checkpoints are only suitable for resuming"
             " training using `--resume_from_checkpoint`."})
+    
+    report_to: str = field(
+        default= "tensorboard", metadata= {"help": 'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
+            ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'})
     
     accelerate_device: str = field(
         default="cuda" if torch.cuda.is_available() else "cpu", metadata={"description": "The device to use."})
@@ -242,9 +244,8 @@ class ModelArguments:
         default=None, metadata= {"help": "Revision of pretrained non-ema model identifier. Must be a branch, tag or git identifier of the local or"
             " remote repository specified with --pretrained_model_name_or_path."})
     
-    report_to: str = field(
-        default= "tensorboard", metadata= {"help": 'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
-            ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'})
+    use_ema: bool= field(
+        default=False, metadata={"help": "Whether to use EMA model."})
 
 @dataclass
 class InferenceArguments:  

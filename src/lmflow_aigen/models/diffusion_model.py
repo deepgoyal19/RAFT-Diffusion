@@ -61,7 +61,7 @@ if is_wandb_available():
 from copy import deepcopy
 
 # from lmflow.datasets.dataset import Dataset
-from lmflow_diffusion.args import FinetunerArguments, ModelArguments
+# from lmflow_diffusion.args import FinetunerArguments, ModelArguments
 
 
 logger = logging.getLogger(__name__)
@@ -109,7 +109,6 @@ class DiffusionModel:
         self.unet = UNet2DConditionModel.from_pretrained(
             self.model_args.pretrained_model_name_or_path, subfolder="unet", revision=self.model_args.non_ema_revision
         )        
-
         # freeze parameters of models to save more memory
         self.vae.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
@@ -121,8 +120,3 @@ class DiffusionModel:
             self.model_args.pretrained_model_name_or_path, subfolder="unet", revision=self.model_args.revision
             )
             self.ema_unet = EMAModel(self.ema_unet.parameters(), model_cls=UNet2DConditionModel, model_config=self.ema_unet.config)
-
-
-
-
-
