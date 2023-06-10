@@ -201,7 +201,7 @@ class Finetuner:
 
     def load_model_hook(self, models, input_dir):
         if self.finetuner_args.use_ema:
-            load_model = EMAModel.from_pretrained(os.path.join(input_dir, "unet_ema"), UNet2DConditionModel)
+            load_model = EMAModel.from_pretrained(os.path.join(input_dir, "unet_ema"), UNet2DConditionModel)self.
             self.ema_unet.load_state_dict(load_model.state_dict())
             self.ema_unet.to(self.accelerator.device)
             del load_model
@@ -250,29 +250,30 @@ class DiffusionFinetuner(Finetuner):
 
     """   
 
-    def __init__(self, finetuner_args, model_args, *args, **kwargs):
+    def __init__(self, finetuner_args, model_args, data_args *args, **kwargs):
         
         self.finetuner_args = finetuner_args
         self.model_args = model_args   
+        self.data_args = data_args
 
+        # Make one log on every process with the configuration for debugging.
+        logging.basicConfig(
+            format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+            datefmt="%m/%d/%Y %H:%M:%S",
+            level=logging.INFO,
+        )
     
+        logger.info(f"Training parameters {finetuner_args}")
 
-    def finetune(self):
+        # If passed along, set the training seed now.
+        if self.finetuner_args.seed is not None:
+            set_seed(self.finetuner_args.seed)
+
+    def finetune(self, model, dataset):
         
         DATASET_NAME_MAPPING = {
             "lambdalabs/pokemon-blip-captions": ("image", "text"),
         }
-
-        if not self.model_args.use_lora:
-                if self.finetuner_args.non_ema_revision is not None:
-                    deprecate(
-                        "non_ema_revision!=None",
-                        "0.15.0",
-                        message=(
-                            "Downloading 'non_ema' weights from revision branches of the Hub is deprecated. Please make sure to"
-                            " use `--variant=non_ema` instead."
-                        ),
-                    )
 
         logging_dir = os.path.join(self.finetuner_args.output_dir, self.finetuner_args.logging_dir)
 
@@ -300,12 +301,6 @@ class DiffusionFinetuner(Finetuner):
                     raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
                 import wandb
 
-        # Make one log on every process with the configuration for debugging.
-        logging.basicConfig(
-            format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-            datefmt="%m/%d/%Y %H:%M:%S",
-            level=logging.INFO,
-        )
         # logger.info(self.accelerator.state, main_process_only=False)
         logger.info(self.accelerator.state)
         if self.accelerator.is_local_main_process:
@@ -317,9 +312,7 @@ class DiffusionFinetuner(Finetuner):
             transformers.utils.logging.set_verbosity_error()
             diffusers.utils.logging.set_verbosity_error()
 
-        # If passed along, set the training seed now.
-        if self.finetuner_args.seed is not None:
-            set_seed(self.finetuner_args.seed)
+
 
         # Handle the repository creation
         if self.accelerator.is_main_process:
@@ -331,40 +324,9 @@ class DiffusionFinetuner(Finetuner):
                     repo_id=self.finetuner_args.hub_model_id or Path(self.finetuner_args.output_dir).name, exist_ok=True, token=self.finetuner_args.hub_token
                 ).repo_id
 
-        # Load scheduler, tokenizer and models.
-        self.noise_scheduler = DDPMScheduler.from_pretrained(self.finetuner_args.pretrained_model_name_or_path, subfolder="scheduler")
-        self.tokenizer = CLIPTokenizer.from_pretrained(
-            self.finetuner_args.pretrained_model_name_or_path, subfolder="tokenizer", revision=self.finetuner_args.revision
-        )
 
         if self.model_args.use_lora:
-            text_encoder = CLIPTextModel.from_pretrained(
-                self.finetuner_args.pretrained_model_name_or_path, subfolder="text_encoder", revision=self.finetuner_args.revision
-            )
-            vae = AutoencoderKL.from_pretrained(self.finetuner_args.pretrained_model_name_or_path, subfolder="vae", revision=self.finetuner_args.revision)
-        else: 
-            with ContextManagers(self.deepspeed_zero_init_disabled_context_manager()):
-                text_encoder = CLIPTextModel.from_pretrained(
-                    self.finetuner_args.pretrained_model_name_or_path, subfolder="text_encoder", revision=self.finetuner_args.revision
-                )
-                vae = AutoencoderKL.from_pretrained(
-                    self.finetuner_args.pretrained_model_name_or_path, subfolder="vae", revision=self.finetuner_args.revision
-                )
-
-        unet = UNet2DConditionModel.from_pretrained(
-            self.finetuner_args.pretrained_model_name_or_path, subfolder="unet", revision=self.finetuner_args.non_ema_revision
-        )
-
-
-
-        # freeze parameters of models to save more memory
-        vae.requires_grad_(False)
-        text_encoder.requires_grad_(False)
-
-
-
-        if self.model_args.use_lora:
-            unet.requires_grad_(False)
+            self.unet.requires_grad_(False)
 
             # For mixed precision training we cast the text_encoder and vae weights to half-precision
             # as these models are only used for inference, keeping weights in full precision is not required.
@@ -375,9 +337,9 @@ class DiffusionFinetuner(Finetuner):
                 weight_dtype = torch.bfloat16
 
             # Move unet, vae and text_encoder to device and cast to weight_dtype
-            unet.to(self.accelerator.device, dtype=weight_dtype)
-            vae.to(self.accelerator.device, dtype=weight_dtype)
-            text_encoder.to(self.accelerator.device, dtype=weight_dtype)
+            self.unet.to(self.accelerator.device, dtype=weight_dtype)
+            self.vae.to(self.accelerator.device, dtype=weight_dtype)
+            self.text_encoder.to(self.accelerator.device, dtype=weight_dtype)
 
             # now we will add new LoRA weights to the attention layers
             # It's important to realize here how many attention weights will be added and of which sizes
@@ -394,28 +356,23 @@ class DiffusionFinetuner(Finetuner):
 
             # Set correct lora layers
             lora_attn_procs = {}
-            for name in unet.attn_processors.keys():
-                cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
+            for name in self.unet.attn_processors.keys():
+                cross_attention_dim = None if name.endswith("attn1.processor") else self.unet.config.cross_attention_dim
                 if name.startswith("mid_block"):
-                    hidden_size = unet.config.block_out_channels[-1]
+                    hidden_size = self.unet.config.block_out_channels[-1]
                 elif name.startswith("up_blocks"):
                     block_id = int(name[len("up_blocks.")])
-                    hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
+                    hidden_size = list(reversed(self.unet.config.block_out_channels))[block_id]
                 elif name.startswith("down_blocks"):
                     block_id = int(name[len("down_blocks.")])
-                    hidden_size = unet.config.block_out_channels[block_id]
+                    hidden_size = self.unet.config.block_out_channels[block_id]
 
                 lora_attn_procs[name] = LoRAAttnProcessor(hidden_size=hidden_size, cross_attention_dim=cross_attention_dim)
 
-            unet.set_attn_processor(lora_attn_procs)
+            self.unet.set_attn_processor(lora_attn_procs)
 
-        else:
+        # else:   
              # Create EMA for the unet.
-            if self.finetuner_args.use_ema:
-                self.ema_unet = UNet2DConditionModel.from_pretrained(
-                    self.finetuner_args.pretrained_model_name_or_path, subfolder="unet", revision=self.finetuner_args.revision
-                )
-                self.ema_unet = EMAModel(self.ema_unet.parameters(), model_cls=UNet2DConditionModel, model_config=self.ema_unet.config)
 
         if self.finetuner_args.enable_xformers_memory_efficient_attention:
             if is_xformers_available():
@@ -426,13 +383,13 @@ class DiffusionFinetuner(Finetuner):
                     logger.warn(
                         "xFormers 0.0.16 cannot be used for training in some GPUs. If you observe problems during training, please update xFormers to at least 0.0.17. See https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
                     )
-                unet.enable_xformers_memory_efficient_attention()
+                self.unet.enable_xformers_memory_efficient_attention()
             else:
                 raise ValueError("xformers is not available. Make sure it is installed correctly")
 
         if self.model_args.use_lora:
 
-            lora_layers = AttnProcsLayers(unet.attn_processors)
+            lora_layers = AttnProcsLayers(self.unet.attn_processors)
 
         else:
             
@@ -442,7 +399,7 @@ class DiffusionFinetuner(Finetuner):
                 self.accelerator.register_load_state_pre_hook(self.load_model_hook)
             
             if self.finetuner_args.gradient_checkpointing:
-                unet.enable_gradient_checkpointing()
+                self.unet.enable_gradient_checkpointing()
 
         # Enable TF32 for faster training on Ampere GPUs,
         # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
@@ -470,7 +427,7 @@ class DiffusionFinetuner(Finetuner):
             optimizer_cls = torch.optim.AdamW
 
         optimizer = optimizer_cls(
-            unet.parameters(),
+            self.unet.parameters(),
             lr=self.finetuner_args.learning_rate,
             betas=(self.finetuner_args.adam_beta1, self.finetuner_args.adam_beta2),
             weight_decay=self.finetuner_args.adam_weight_decay,
@@ -573,8 +530,8 @@ class DiffusionFinetuner(Finetuner):
             )
         else:
             # Prepare everything with our `accelerator`.
-            unet, optimizer, train_dataloader, lr_scheduler = self.accelerator.prepare(
-                unet, optimizer, train_dataloader, lr_scheduler
+            self.unet, optimizer, train_dataloader, lr_scheduler = self.accelerator.prepare(
+                self.unet, optimizer, train_dataloader, lr_scheduler
             )
 
             if self.finetuner_args.use_ema:
@@ -589,8 +546,8 @@ class DiffusionFinetuner(Finetuner):
                 weight_dtype = torch.bfloat16
 
             # Move text_encode and vae to gpu and cast to weight_dtype
-            text_encoder.to(self.accelerator.device, dtype=weight_dtype)
-            vae.to(self.accelerator.device, dtype=weight_dtype)
+            self.text_encoder.to(self.accelerator.device, dtype=weight_dtype)
+            self.vae.to(self.accelerator.device, dtype=weight_dtype)
 
         # We need to recalculate our total training steps as the size of the training dataloader may have changed.
         num_update_steps_per_epoch = math.ceil(len(train_dataloader) / self.finetuner_args.gradient_accumulation_steps)
@@ -654,7 +611,7 @@ class DiffusionFinetuner(Finetuner):
         progress_bar.set_description("Steps")
 
         for epoch in range(first_epoch, self.finetuner_args.num_train_epochs):
-            unet.train()
+            self.unet.train()
             train_loss = 0.0
             for step, batch in enumerate(train_dataloader):
                 # Skip steps until we reach the resumed step
@@ -663,10 +620,10 @@ class DiffusionFinetuner(Finetuner):
                         progress_bar.update(1)
                     continue
 
-                with self.accelerator.accumulate(unet):
+                with self.accelerator.accumulate(self.unet):
                     # Convert images to latent space
-                    latents = vae.encode(batch["pixel_values"].to(weight_dtype)).latent_dist.sample()
-                    latents = latents * vae.config.scaling_factor
+                    latents = self.vae.encode(batch["pixel_values"].to(weight_dtype)).latent_dist.sample()
+                    latents = latents * self.vae.config.scaling_factor
 
                     # Sample noise that we'll add to the latents
                     noise = torch.randn_like(latents)
@@ -690,7 +647,7 @@ class DiffusionFinetuner(Finetuner):
                         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
 
                     # Get the text embedding for conditioning
-                    encoder_hidden_states = text_encoder(batch["input_ids"])[0]
+                    encoder_hidden_states = self.text_encoder(batch["input_ids"])[0]
 
                     # Get the target for loss depending on the prediction type
                     if self.noise_scheduler.config.prediction_type == "epsilon":
@@ -701,7 +658,7 @@ class DiffusionFinetuner(Finetuner):
                         raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
 
                     # Predict the noise residual and compute loss
-                    model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
+                    model_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
 
                     if self.finetuner_args.snr_gamma is None:
                         loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
@@ -727,7 +684,7 @@ class DiffusionFinetuner(Finetuner):
                     # Backpropagate
                     self.accelerator.backward(loss)
                     if self.accelerator.sync_gradients:
-                        self.accelerator.clip_grad_norm_(unet.parameters(), self.finetuner_args.max_grad_norm)
+                        self.accelerator.clip_grad_norm_(self.unet.parameters(), self.finetuner_args.max_grad_norm)
                     optimizer.step()
                     lr_scheduler.step()
                     optimizer.zero_grad()
@@ -735,7 +692,7 @@ class DiffusionFinetuner(Finetuner):
                 # Checks if the self.accelerator has performed an optimization step behind the scenes
                 if self.accelerator.sync_gradients:
                     if self.finetuner_args.use_ema:
-                        self.ema_unet.step(unet.parameters())
+                        self.ema_unet.step(self.unet.parameters())
                     progress_bar.update(1)
                     global_step += 1
                     self.accelerator.log({"train_loss": train_loss}, step=global_step)
@@ -763,7 +720,7 @@ class DiffusionFinetuner(Finetuner):
                         # create pipeline
                         pipeline = DiffusionPipeline.from_pretrained(
                             self.finetuner_args.pretrained_model_name_or_path,
-                            unet=self.accelerator.unwrap_model(unet),
+                            unet=self.accelerator.unwrap_model(self.unet),
                             revision=self.finetuner_args.revision,
                             torch_dtype=weight_dtype,
                         )
@@ -797,13 +754,13 @@ class DiffusionFinetuner(Finetuner):
                     else:
                         if self.finetuner_args.use_ema:
                             # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
-                            self.ema_unet.store(unet.parameters())
-                            self.ema_unet.copy_to(unet.parameters())
+                            self.ema_unet.store(self.unet.parameters())
+                            self.ema_unet.copy_to(self.unet.parameters())
                         self.deepspeed_zero_init_disabled_context_managerlog_validation(
-                            vae,
-                            text_encoder,
+                            self.vae,
+                            self.text_encoder,
                             self.tokenizer,
-                            unet,
+                            self.unet,
                             self.finetuner_args,
                             self.accelerator,
                             weight_dtype,
@@ -811,14 +768,14 @@ class DiffusionFinetuner(Finetuner):
                         )
                         if self.finetuner_args.use_ema:
                             # Switch back to the original UNet parameters.
-                            self.ema_unet.restore(unet.parameters())
+                            self.ema_unet.restore(self.unet.parameters())
 
         # Create the pipeline using the trained modules and save it.
         self.accelerator.wait_for_everyone()
         if self.accelerator.is_main_process:
             if self.model_args.use_lora:
-                unet = unet.to(torch.float32)
-                unet.save_attn_procs(self.finetuner_args.output_dir)
+                self.unet = self.unet.to(torch.float32)
+                self.unet.save_attn_procs(self.finetuner_args.output_dir)
 
                 if self.finetuner_args.push_to_hub:
                     self.save_model_card(
@@ -837,16 +794,16 @@ class DiffusionFinetuner(Finetuner):
 
 
             else:
-                unet = self.accelerator.unwrap_model(unet)
+                self.unet = self.accelerator.unwrap_model(self.unet)
                 if self.finetuner_args.use_ema:
-                    self.ema_unet.copy_to(unet.parameters())
+                    self.ema_unet.copy_to(self.unet.parameters())
 
                 pipeline = StableDiffusionPipeline.from_pretrained(
                     self.finetuner_args.pretrained_model_name_or_path,
-                    text_encoder=text_encoder,
-                    vae=vae,
-                    unet=unet,
-                    revision=self.finetuner_args.revision,
+                    text_encoder=self.text_encoder,
+                    vae=self.vae,
+                    unet=self.unet,
+                    revision=self.model_args.revision,
                 )
                 pipeline.save_pretrained(self.finetuner_args.output_dir)
 
