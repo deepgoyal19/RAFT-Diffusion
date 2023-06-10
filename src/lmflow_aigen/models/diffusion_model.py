@@ -121,14 +121,114 @@ class DiffusionModel:
             )
             self.ema_unet = EMAModel(self.ema_unet.parameters(), model_cls=UNet2DConditionModel, model_config=self.ema_unet.config)
     
-    def to_device(self,device,weight_dtype):
+    def to_device(self, device, weight_dtype):
         self.unet.to(device, dtype=weight_dtype)
         self.vae.to(device, dtype=weight_dtype)
         self.text_encoder.to(device, dtype=weight_dtype)
 
 
-    def save(self):
+    def save(self, output_dir):
+
+        if self.model_args.use_lora:
+            self.unet = self.unet.to(torch.float32)
+            self.unet.save_attn_procs(output_dir)
+        
+        else:
+            self.unet = self.accelerator.unwrap_model(self.unet)
+            if self.model_args.use_ema:
+                self.ema_unet.copy_to(self.unet.parameters())
+
+            pipeline = StableDiffusionPipeline.from_pretrained(
+                self.model_args.pretrained_model_name_or_path,
+                text_encoder=self.text_encoder,
+                vae=self.vae,
+                unet=self.unet,
+                revision=self.model_args.revision,
+            )
+            pipeline.save_pretrained(output_dir)        
+
+
+    def save_model_card(self, repo_id: str, images=None, base_model=str, dataset_name=str, repo_folder=None):
+        img_str = ""
+        for i, image in enumerate(images):
+            image.save(os.path.join(repo_folder, f"image_{i}.png"))
+            img_str += f"![img_{i}](./image_{i}.png)\n"
+
+        yaml = f"""
+            ---
+            license: creativeml-openrail-m
+            base_model: {base_model}
+            tags:
+            - stable-diffusion
+            - stable-diffusion-diffusers
+            - text-to-image
+            - diffusers
+            - lora
+            inference: true
+            ---
+        """
+        model_card = f"""
+            # LoRA text2image fine-tuning - {repo_id}
+            These are LoRA adaption weights for {base_model}. The weights were fine-tuned on the {dataset_name} dataset. You can find some example images in the following. \n
+            {img_str}
+        """
+        with open(os.path.join(repo_folder, "README.md"), "w") as f:
+            f.write(yaml + model_card)
+
+    def push_to_hub(self, hub_model_id, output_dir, hub_token, images, dataset_name):
+
+        repo_id = create_repo(
+            repo_id=hub_model_id or Path(output_dir).name, exist_ok=True, token=hub_token
+        ).repo_id        
+
+        if self.model_args.use_lora:
+            self.save_model_card(
+                repo_id,
+                images=images,
+                base_model=self.model_args.pretrained_model_name_or_path,
+                dataset_name=dataset_name,
+                repo_folder=output_dir,
+            )
+        upload_folder(
+            repo_id=repo_id,
+            folder_path=output_dir,
+            commit_message="End of training",
+            ignore_patterns=["step_*", "epoch_*"],
+        )       
+
+    def inference(self):
         pass
 
-    def resume_from_path(self):
-        pass
+    def resume_from_path(self, resume_from_checkpoint, output_dir, gradient_accumulation_steps, num_update_steps_per_epoch):
+        
+        if resume_from_checkpoint:
+            if resume_from_checkpoint != "latest":
+                path = os.path.basename(resume_from_checkpoint)
+            else:
+                # Get the most recent checkpoint
+                dirs = os.listdir(output_dir)
+                dirs = [d for d in dirs if d.startswith("checkpoint")]
+                dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
+                path = dirs[-1] if len(dirs) > 0 else None
+
+            if path is None:
+                self.accelerator.print(
+                    f"Checkpoint '{resume_from_checkpoint}' does not exist. Starting a new training run."
+                )
+# Deepanshu Comment: Please do check the return values
+                resume_from_checkpoint = None
+                resume_step = None
+                global_step = 0
+                first_epoch = 0
+                return resume_from_checkpoint, global_step, first_epoch, resume_step
+            
+            else:
+                self.accelerator.print(f"Resuming from checkpoint {path}")
+                self.accelerator.load_state(os.path.join(output_dir, path))
+                global_step = int(path.split("-")[1])
+
+                resume_global_step = global_step * gradient_accumulation_steps
+                first_epoch = global_step // num_update_steps_per_epoch
+                resume_step = resume_global_step % (num_update_steps_per_epoch * gradient_accumulation_steps)
+
+                return resume_from_checkpoint, global_step, first_epoch, resume_step

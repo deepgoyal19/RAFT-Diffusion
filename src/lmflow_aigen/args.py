@@ -139,7 +139,7 @@ class FinetunerArguments:
         default="logs", metadata={"help": "TensorBoard log directory."})
     
     mixed_precision: Optional[str] = field(
-        default=None, metadata={"help": "Use mixed precision training using Apex. Options: '00', '01', '02', '03'."})
+        default=None, metadata={"help": "Use mixed precision training using Apex., Options: '00', '01', '02', '03'."})
     
     resume_from_checkpoint: Optional[str] = field(
         default=None, metadata={"help": "Path to a checkpoint from which to resume training."})
