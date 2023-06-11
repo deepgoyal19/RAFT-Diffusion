@@ -84,36 +84,7 @@ class Finetuner:
         # Compute SNR.
         snr = (alpha / sigma) ** 2
         return snr
-    
-    def tokenize_captions(self, examples, is_train=True):
-        captions = []
-        for caption in examples[self.finetuner_args.caption_column]:
-            if isinstance(caption, str):
-                captions.append(caption)
-            elif isinstance(caption, (list, np.ndarray)):
-                # take a random caption if there are multiple
-                captions.append(random.choice(caption) if is_train else caption[0])
-            else:
-                raise ValueError(
-                    f"Caption column `{self.finetuner_args.caption_column}` should contain either strings or lists of strings."
-                )
-        inputs = self.tokenizer(
-            captions, max_length = self.tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
-        )
-        return inputs.input_ids
-    
-    def preprocess_train(self, examples):
-        images = [image.convert("RGB") for image in examples[self.image_column]]
-        examples["pixel_values"] = [self.train_transforms(image) for image in images]
-        examples["input_ids"] = self.tokenize_captions(examples)
-        return examples
-
-    def collate_fn(self, examples):
-        pixel_values = torch.stack([example["pixel_values"] for example in examples])
-        pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-        input_ids = torch.stack([example["input_ids"] for example in examples])
-        return {"pixel_values": pixel_values, "input_ids": input_ids}
-    
+        
     def log_validation(self, vae, text_encoder, tokenizer, unet, args, accelerator, weight_dtype, epoch):
         logger.info("Running validation... ")
 
@@ -226,11 +197,11 @@ class DiffusionFinetuner(Finetuner):
 
     """   
 
-    def __init__(self, finetuner_args, model_args, *args, **kwargs):
+    def __init__(self, finetuner_args, model_args, data_args, *args, **kwargs):
         
         self.finetuner_args = finetuner_args
         self.model_args = model_args   
-        # self.data_args = data_args
+        self.data_args = data_args
 
         # Make one log on every process with the configuration for debugging.
         logging.basicConfig(
@@ -245,7 +216,7 @@ class DiffusionFinetuner(Finetuner):
         if self.finetuner_args.seed is not None:
             set_seed(self.finetuner_args.seed)
 
-    def finetune(self, model):
+    def finetune(self, model, dataset):
         
         # model.unet = model.unet
         # model.vae = model.vae
@@ -253,9 +224,7 @@ class DiffusionFinetuner(Finetuner):
         self.noise_scheduler = model.noise_scheduler
         self.tokenizer = model.tokenizer
 
-        DATASET_NAME_MAPPING = {
-            "lambdalabs/pokemon-blip-captions": ("image", "text"),
-        }
+
 
         logging_dir = os.path.join(self.finetuner_args.output_dir, self.finetuner_args.logging_dir)
 
@@ -410,92 +379,9 @@ class DiffusionFinetuner(Finetuner):
             eps=self.finetuner_args.adam_epsilon,
         )
 
-        # Get the datasets: you can either provide your own training and evaluation files (see below)
-        # or specify a Dataset from the hub (the dataset will be downloaded automatically from the datasets Hub).
-
-        # In distributed training, the load_dataset function guarantees that only one local process can concurrently
-        # download the dataset.
-
-        
-        if self.finetuner_args.dataset_name is not None:
-            # Downloading and loading a dataset from the hub.
-            dataset = load_dataset(
-                self.finetuner_args.dataset_name,
-                self.finetuner_args.dataset_config_name,
-                cache_dir=self.finetuner_args.cache_dir,
-            )
-        else:
-            data_files = {}
-            if self.finetuner_args.train_data_dir is not None:
-                data_files["train"] = os.path.join(self.finetuner_args.train_data_dir, "**")
-            dataset = load_dataset(
-                "imagefolder",
-                data_files=data_files,
-                cache_dir=self.finetuner_args.cache_dir,
-            )
-            # See more about loading custom images at
-            # https://huggingface.co/docs/datasets/v2.4.0/en/image_load#imagefolder
-
-        # Preprocessing the datasets.
-        # We need to tokenize inputs and targets.
-        column_names = dataset["train"].column_names
-
-        # 6. Get the column names for input/target.
-        dataset_columns = DATASET_NAME_MAPPING.get(self.finetuner_args.dataset_name, None)
-        if self.finetuner_args.image_column is None:
-            image_column = dataset_columns[0] if dataset_columns is not None else column_names[0]
-        else:
-            image_column = self.finetuner_args.image_column
-            if image_column not in column_names:
-                raise ValueError(
-                    f"--image_column' value '{self.finetuner_args.image_column}' needs to be one of: {', '.join(column_names)}"
-                )
-        self.image_column=image_column
-
-        
-
-        if self.finetuner_args.caption_column is None:
-            caption_column = dataset_columns[1] if dataset_columns is not None else column_names[1]
-        else:
-            caption_column = self.finetuner_args.caption_column
-            if caption_column not in column_names:
-                raise ValueError(
-                    f"--caption_column' value '{self.finetuner_args.caption_column}' needs to be one of: {', '.join(column_names)}"
-                )
-
-        # Preprocessing the datasets.
-        self.train_transforms = transforms.Compose(
-            [
-                transforms.Resize(self.finetuner_args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-                transforms.CenterCrop(self.finetuner_args.resolution) if self.finetuner_args.center_crop else transforms.RandomCrop(self.finetuner_args.resolution),
-                transforms.RandomHorizontalFlip() if self.finetuner_args.random_flip else transforms.Lambda(lambda x: x),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
-            ]
-        )
-
-
-
-
-
-        with self.accelerator.main_process_first():
-            if self.finetuner_args.max_train_samples is not None:
-                dataset["train"] = dataset["train"].shuffle(seed=self.finetuner_args.seed).select(range(self.finetuner_args.max_train_samples))
-            # Set the training transforms
-            train_dataset = dataset["train"].with_transform(self.preprocess_train)
-
-        # DataLoaders creation:
-        train_dataloader = torch.utils.data.DataLoader(
-            train_dataset,
-            shuffle=True,
-            collate_fn=self.collate_fn,
-            batch_size=self.finetuner_args.train_batch_size,
-            num_workers=self.finetuner_args.dataloader_num_workers,
-        )
-
-        
-        # Hanze comments: All the above dataset operation should be in the dataset.py to define a new class. train_dataloader = dataset.train_dataloader.
-        # For save, resume, etc. We may use integrate them into model.py as more as possible. I have provided an example about to_device.
+        # Get training dataset and training dataloader
+        train_dataset = dataset.train_dataset(self.accelerator, self.finetuner_args.seed, self.finetuner_args.max_train_samples, self.tokenizer)
+        train_dataloader = dataset.train_dataloader(self.finetuner_args.train_batch_size)
 
         # Scheduler and math around the number of training steps.
         overrode_max_train_steps = False
@@ -685,6 +571,7 @@ class DiffusionFinetuner(Finetuner):
                     break
 
             if self.accelerator.is_main_process:
+                images = []
                 if self.finetuner_args.validation_prompts is not None and epoch % self.finetuner_args.validation_epochs == 0:  
                     if self.model_args.use_lora:
                         logger.info(
@@ -703,7 +590,7 @@ class DiffusionFinetuner(Finetuner):
 
                         # run inference
                         generator = torch.Generator(device=self.accelerator.device).manual_seed(self.finetuner_args.seed)
-                        images = []
+                        # images = []
                         for _ in range(self.finetuner_args.num_validation_images):
                             images.append(
                                 pipeline(self.finetuner_args.validation_prompt, num_inference_steps=30, generator=generator).images[0]
@@ -749,7 +636,8 @@ class DiffusionFinetuner(Finetuner):
         if self.accelerator.is_main_process:
             # save model
             model.save(self.finetuner_args.output_dir, self.accelerator)
-            
+
+
             # Push model to hub
             if self.finetuner_args.push_to_hub:
                 model.push_to_hub(
@@ -757,7 +645,7 @@ class DiffusionFinetuner(Finetuner):
                     self.finetuner_args.output_dir, 
                     self.finetuner_args.hub_token, 
                     images, 
-                    self.finetuner_args.dataset_name
+                    self.data_args.dataset_name
                     )
         
         if self.model_args.use_lora: 

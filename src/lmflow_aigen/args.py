@@ -18,30 +18,7 @@ import torch
 
 @dataclass
 class FinetunerArguments:
-    
-    dataset_name: Optional[str] = field(
-        default=None, metadata={
-            "help": "The name of the Dataset (from the HuggingFace hub to train on."
-                    " It can also be a path pointing to a local copy of a dataset in your filesystem,"
-                    " or to a folder containing files that 🤗 Datasets can understand."
-        })
-    
-    dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The config of the Dataset, leave as None if there's only one config."})
-    
-    train_data_dir: Optional[str] = field(
-        default=None, metadata={
-            "help": "A folder containing the training data. Folder contents must follow the structure described in"
-                    " https://huggingface.co/docs/datasets/image_dataset#imagefolder. In particular, a `metadata.jsonl` file"
-                    " must exist to provide the captions for the images. Ignored if `dataset_name` is specified."
-        })
-    
-    image_column: str = field(
-        default="image", metadata={"help": "The column of the dataset containing an image."})
-    
-    caption_column: str = field(
-        default="text", metadata={"help": "The column of the dataset containing a caption or a list of captions."})
-    
+        
     validation_prompt: Optional[str] = field(
         default=None, metadata={"help": "A prompt that is sampled during training for inference."})
     
@@ -57,20 +34,9 @@ class FinetunerArguments:
     output_dir: str = field(
         default="sd-model-finetuned-lora", metadata={"help": "The output directory where the model predictions and checkpoints will be written."})
     
-    cache_dir: Optional[str] = field(
-        default=None, metadata={"help": "The directory where the downloaded models and datasets will be stored."})
     
     seed: Optional[int] = field(
         default=None, metadata={"help": "A seed for reproducible training."})
-    
-    resolution: int = field(
-        default=512, metadata={"help": "The resolution for input images, all the images in the train/validation dataset will be resized to this resolution"})
-    
-    center_crop: bool = field(
-        default=False, metadata={"help": "Whether to center crop the input images to the resolution. If not set, the images will be randomly cropped. The images will be resized to the resolution first before cropping."})
-    
-    random_flip: bool = field(
-        default=False, metadata={"help": "Whether to randomly flip images horizontally"})
     
     train_batch_size: int = field(
         default=16, metadata={"help": "Batch size (per device for the training dataloader."})
@@ -107,9 +73,6 @@ class FinetunerArguments:
     
     allow_tf32: bool = field(
         default=False, metadata={"help": "Whether or not to allow TF32 on Ampere GPUs."})
-    
-    dataloader_num_workers: int = field(
-        default=0, metadata={"help": "Number of subprocesses to use for data loading."})
     
     adam_beta1: float = field(
         default=0.9, metadata={"help": "The beta1 parameter for the Adam optimizer."})
@@ -329,6 +292,48 @@ class InferenceArguments:
                 `self.processor` in
                 [diffusers.cross_attention](https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/cross_attention.py).'''})
 
+
+@dataclass
+class DatasetArguments:
+
+    dataset_name: Optional[str] = field(
+        default=None, metadata={
+            "help": "The name of the Dataset (from the HuggingFace hub to train on."
+                    " It can also be a path pointing to a local copy of a dataset in your filesystem,"
+                    " or to a folder containing files that 🤗 Datasets can understand."
+        })
+    
+    dataset_config_name: Optional[str] = field(
+        default=None, metadata={"help": "The config of the Dataset, leave as None if there's only one config."})
+    
+    train_data_dir: Optional[str] = field(
+        default=None, metadata={
+            "help": "A folder containing the training data. Folder contents must follow the structure described in"
+                    " https://huggingface.co/docs/datasets/image_dataset#imagefolder. In particular, a `metadata.jsonl` file"
+                    " must exist to provide the captions for the images. Ignored if `dataset_name` is specified."
+        })
+    
+    image_column: str = field(
+        default="image", metadata={"help": "The column of the dataset containing an image."})
+    
+    caption_column: str = field(
+        default="text", metadata={"help": "The column of the dataset containing a caption or a list of captions."})
+    
+    #Deepanshu Comments: Should this be in finetunerArgs or DatasetArgs
+    dataloader_num_workers: int = field(
+        default=0, metadata={"help": "Number of subprocesses to use for data loading."})
+
+    resolution: int = field(
+        default=512, metadata={"help": "The resolution for input images, all the images in the train/validation dataset will be resized to this resolution"})
+    
+    center_crop: bool = field(
+        default=False, metadata={"help": "Whether to center crop the input images to the resolution. If not set, the images will be randomly cropped. The images will be resized to the resolution first before cropping."})
+    
+    random_flip: bool = field(
+        default=False, metadata={"help": "Whether to randomly flip images horizontally"})
+
+    cache_dir: Optional[str] = field(
+        default=None, metadata={"help": "The directory where the downloaded models and datasets will be stored."})
 
 @dataclass
 class RaftAlignterArguments:

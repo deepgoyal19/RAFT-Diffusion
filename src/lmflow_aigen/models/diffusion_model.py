@@ -180,7 +180,7 @@ class DiffusionModel:
         repo_id = create_repo(
             repo_id=hub_model_id or Path(output_dir).name, exist_ok=True, token=hub_token
         ).repo_id        
-
+        
         if self.model_args.use_lora:
             self.save_model_card(
                 repo_id,
