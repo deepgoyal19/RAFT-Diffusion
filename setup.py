@@ -1,6 +1,5 @@
 import os
-from setuptools import find_packages
-from setuptools import setup
+from setuptools import find_packages, setup
 import subprocess
 
 folder = os.path.dirname(__file__)
@@ -23,7 +22,7 @@ if os.path.exists(readme_path):
     readme_contents = fp.read().strip()
 
 setup(
-    name="lmflow",
+    name="lmflow_aigen",
     version=__version__,
     description="LMFlow AI Generation: AIGC tuning",
     author="The LMFlow Team",
