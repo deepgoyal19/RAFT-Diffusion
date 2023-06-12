@@ -17,41 +17,55 @@ Typical usage example:
 import sys
 import os
 sys.path.remove(os.path.abspath(os.path.dirname(sys.argv[0])))
-from transformers import HfArgumentParser
 
-from lmflow.args import (
+from lmflow_aigen.args import (
     ModelArguments,
     DatasetArguments,
-    AutoArguments,
+    FinetunerArguments,
 )
 
-from lmflow.datasets.dataset import Dataset
-from lmflow.models.auto_model import AutoModel
-from lmflow.pipeline.auto_pipeline import AutoPipeline
+from lmflow_aigen.datasets.dataset import Dataset
+from lmflow_aigen.models.diffusion_finetuner import DiffusionFinetuner
+from lmflow_aigen.pipeline.diffusion_model import DiffusionModel
 
 
 def main():
-	# Parses arguments
-    pipeline_name = "diffusion_finetuner"
-    PipelineArguments = AutoArguments.get_pipeline_args_class(pipeline_name)
+    finetuner_args = FinetunerArguments(
 
-    parser = HfArgumentParser((ModelArguments, DatasetArguments, PipelineArguments))
-    if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-        # If we pass only one argument to the script and it's the path to a json file,
-        # let's parse it to get our arguments.
-        model_args, data_args, pipeline_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
-    else:
-        model_args, data_args, pipeline_args = parser.parse_args_into_dataclasses()
-
-    # Initialization
-    finetuner = AutoPipeline.get_pipeline(
-        pipeline_name=pipeline_name,
-        model_args=model_args,
-        data_args=data_args,
-        pipeline_args=pipeline_args,
+        enable_xformers_memory_efficient_attention=True,
+        lr_scheduler='constant',
+        learning_rate=1e-6,
+        lr_warmup_steps=0,
+        seed=123,
+        max_train_steps=60,
+        gradient_accumulation_steps=1,
+        gradient_checkpointing=True,
+        train_batch_size=1,
+        max_grad_norm=1,
+        mixed_precision="fp16",
+        output_dir='/home/deepanshu/LMFlow-diffusion/Model',
+        accelerate_device= 'cuda',
+        validation_prompt='pikachu',
+        resume_from_checkpoint='latest',
+        hub_token='[REDACTED]',
+        hub_model_id='new_model',
+        num_validation_images=1,
+        push_to_hub=True,
+        validation_epochs=60
     )
-    dataset = Dataset(data_args)
-    model = AutoModel.get_model(model_args)
+
+    model_args= ModelArguments(
+        pretrained_model_name_or_path="runwayml/stable-diffusion-v1-5",
+        use_ema=True,
+        use_lora= False)
+
+    data_args=DatasetArguments(
+        dataset_name="lambdalabs/pokemon-blip-captions"
+    )
+
+    finetuner = DiffusionFinetuner(finetuner_args=finetuner_args, model_args=model_args, data_args=data_args)
+    model = DiffusionModel(model_args)
+    dataset= Dataset(data_args)
 
     # Finetuning
     tuned_model = finetuner.tune(model=model, dataset=dataset)
