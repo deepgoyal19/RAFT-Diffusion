@@ -1,58 +1,20 @@
 #!/usr/bin/env python
 # coding=utf-8
-"""A one-line summary of the module or program, terminated by a period.
-
-Leave one blank line.  The rest of this docstring should contain an
-overall description of the module or program.  Optionally, it may also
-contain a brief description of exported classes and functions and/or usage
-examples.
-
-Typical usage example:
-
-  foo = ClassFoo()
-  bar = foo.FunctionBar()
-"""
-
-#!/usr/bin/env python
-# coding=utf-8
 """The Finetuner class simplifies the process of running finetuning process on a language model for a TunableModel instance with given dataset. 
 """
 
-import argparse
+
 import logging
-import math
 import os
-import random
 from pathlib import Path
 import accelerate
-import datasets
-import numpy as np
 import torch
-import torch.nn.functional as F
-import torch.utils.checkpoint
-import transformers
-from accelerate import Accelerator
-from accelerate.logging import get_logger
-from accelerate.state import AcceleratorState
-from accelerate.utils import ProjectConfiguration, set_seed
-from datasets import load_dataset
 from huggingface_hub import create_repo, upload_folder
-from packaging import version
-from torchvision import transforms
-from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 from transformers.utils import ContextManagers
-import diffusers
 from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel, StableDiffusionPipeline
-from diffusers.loaders import AttnProcsLayers
-from diffusers.models.attention_processor import LoRAAttnProcessor
-from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.utils import check_min_version, is_wandb_available, deprecate
-from diffusers.utils.import_utils import is_xformers_available
-import copy
-import sys
-from itertools import chain
 
 
 if is_wandb_available():
@@ -60,12 +22,8 @@ if is_wandb_available():
 
 from copy import deepcopy
 
-# from lmflow.datasets.dataset import Dataset
-# from lmflow_diffusion.args import FinetunerArguments, ModelArguments
-
 
 logger = logging.getLogger(__name__)
-
 
 
 class DiffusionModel:

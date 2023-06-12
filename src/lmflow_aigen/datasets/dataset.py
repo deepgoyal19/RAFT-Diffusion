@@ -11,14 +11,10 @@ Face dataset, mapping datasets, and retrieving the backend dataset and arguments
 
 # Importing necessary libraries and modules
 import os
-import json
 import random
 import numpy as np
-from pathlib import Path
-from typing import Optional
 import torch
 from datasets import load_dataset
-from datasets import Dataset as HFDataset
 from torchvision import transforms
 
 class Dataset:
