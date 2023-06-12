@@ -29,8 +29,8 @@ from lmflow_aigen.models.diffusion_model import DiffusionModel
 
 
 def main():
+    
     finetuner_args = FinetunerArguments(
-
         enable_xformers_memory_efficient_attention=True,
         lr_scheduler='constant',
         learning_rate=1e-6,
