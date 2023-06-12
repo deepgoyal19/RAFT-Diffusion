@@ -42,14 +42,11 @@ def main():
         train_batch_size=1,
         max_grad_norm=1,
         mixed_precision="fp16",
-        output_dir='/home/deepanshu/LMFlow-diffusion/Model',
+        output_dir= 'output_dir_path',
         accelerate_device= 'cuda',
         validation_prompt='pikachu',
         resume_from_checkpoint='latest',
-        hub_token='[REDACTED]',
-        hub_model_id='new_model',
         num_validation_images=1,
-        push_to_hub=True,
         validation_epochs=60
     )
 
