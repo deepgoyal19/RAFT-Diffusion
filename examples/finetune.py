@@ -16,7 +16,6 @@ Typical usage example:
 
 import sys
 import os
-sys.path.remove(os.path.abspath(os.path.dirname(sys.argv[0])))
 
 from lmflow_aigen.args import (
     ModelArguments,
@@ -25,8 +24,8 @@ from lmflow_aigen.args import (
 )
 
 from lmflow_aigen.datasets.dataset import Dataset
-from lmflow_aigen.models.diffusion_finetuner import DiffusionFinetuner
-from lmflow_aigen.pipeline.diffusion_model import DiffusionModel
+from lmflow_aigen.pipeline.diffusion_finetuner import DiffusionFinetuner
+from lmflow_aigen.models.diffusion_model import DiffusionModel
 
 
 def main():
@@ -68,7 +67,7 @@ def main():
     dataset= Dataset(data_args)
 
     # Finetuning
-    tuned_model = finetuner.tune(model=model, dataset=dataset)
+    tuned_model = finetuner.finetune(model=model, dataset=dataset)
 
 
 if __name__ == '__main__':
