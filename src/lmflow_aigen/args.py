@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
-"""This script defines dataclasses: ModelArguments, InferenceAguments and DatasetArguments,
+"""This script defines dataclasses: ModelArguments, InferenceArguments, FinetunerArguments and DatasetArguments,
 that contain the arguments for the model and dataset used in training.
 
 
