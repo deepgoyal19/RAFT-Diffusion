@@ -15,7 +15,10 @@ from transformers.utils import ContextManagers
 from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel, StableDiffusionPipeline
 from diffusers.training_utils import EMAModel
 from diffusers.utils import check_min_version, is_wandb_available, deprecate
-
+from diffusers.models.attention_processor import LoRAAttnProcessor
+from diffusers.utils.import_utils import is_xformers_available
+from packaging import version
+import numpy as np 
 
 if is_wandb_available():
     import wandb
@@ -79,10 +82,13 @@ class DiffusionModel:
             )
             self.ema_unet = EMAModel(self.ema_unet.parameters(), model_cls=UNet2DConditionModel, model_config=self.ema_unet.config)
     
-    def to_device(self, device, weight_dtype):
-        self.unet.to(device, dtype=weight_dtype)
-        self.vae.to(device, dtype=weight_dtype)
-        self.text_encoder.to(device, dtype=weight_dtype)
+    def to_device(self, device):
+        if self.model_args.use_lora:
+            self.unet.to(device, dtype=self.weight_dtype)
+        self.vae.to(device, dtype=self.weight_dtype)
+        self.text_encoder.to(device, dtype=self.weight_dtype)
+        if self.model_args.use_ema and (self.model_args.use_lora == False):
+            self.ema_unet.to(device)
 
 
     def save(self, output_dir, accelerator):
@@ -133,7 +139,7 @@ class DiffusionModel:
         with open(os.path.join(repo_folder, "README.md"), "w") as f:
             f.write(yaml + model_card)
 
-    def push_to_hub(self, hub_model_id, output_dir, hub_token, images, dataset_name):
+    def push_to_hub(self, hub_model_id, output_dir, hub_token, dataset_name):
 
         repo_id = create_repo(
             repo_id=hub_model_id or Path(output_dir).name, exist_ok=True, token=hub_token
@@ -142,7 +148,7 @@ class DiffusionModel:
         if self.model_args.use_lora:
             self.save_model_card(
                 repo_id,
-                images=images,
+                images=self.images,
                 base_model=self.model_args.pretrained_model_name_or_path,
                 dataset_name=dataset_name,
                 repo_folder=output_dir,
@@ -154,8 +160,6 @@ class DiffusionModel:
             ignore_patterns=["step_*", "epoch_*"],
         )       
 
-    def inference(self):
-        pass
 
     def resume_from_path(self, resume_from_checkpoint, output_dir, gradient_accumulation_steps, num_update_steps_per_epoch, accelerator):
         
@@ -173,7 +177,7 @@ class DiffusionModel:
                 accelerator.print(
                     f"Checkpoint '{resume_from_checkpoint}' does not exist. Starting a new training run."
                 )
-# Deepanshu Comment: Please do check the return values
+    # Deepanshu Comment: Please do check the return values
                 resume_from_checkpoint = None
                 resume_step = None
                 global_step = 0
@@ -190,3 +194,161 @@ class DiffusionModel:
                 resume_step = resume_global_step % (num_update_steps_per_epoch * gradient_accumulation_steps)
 
                 return resume_from_checkpoint, global_step, first_epoch, resume_step
+
+    def set_weight_dtype(self, mixed_precision):
+        self.weight_dtype = torch.float32
+        if mixed_precision == "fp16":
+            self.weight_dtype = torch.float16
+        elif mixed_precision == "bf16":
+            self.weight_dtype = torch.bfloat16
+
+    def set_lora_attn_proccessor_to_unet(self):
+        self.unet.requires_grad_(False)
+
+        # now we will add new LoRA weights to the attention layers
+        # It's important to realize here how many attention weights will be added and of which sizes
+        # The sizes of the attention layers consist only of two different variables:
+        # 1) - the "hidden_size", which is increased according to `unet.config.block_out_channels`.
+        # 2) - the "cross attention size", which is set to `unet.config.cross_attention_dim`.
+
+        # Let's first see how many attention processors we will have to set.
+        # For Stable Diffusion, it should be equal to:
+        # - down blocks (2x attention layers) * (2x transformer layers) * (3x down blocks) = 12
+        # - mid blocks (2x attention layers) * (1x transformer layers) * (1x mid blocks) = 2
+        # - up blocks (2x attention layers) * (3x transformer layers) * (3x down blocks) = 18
+        # => 32 layers
+
+        # Set correct lora layers
+        lora_attn_procs = {}
+        for name in self.unet.attn_processors.keys():
+            cross_attention_dim = None if name.endswith("attn1.processor") else self.unet.config.cross_attention_dim
+            if name.startswith("mid_block"):
+                hidden_size = self.unet.config.block_out_channels[-1]
+            elif name.startswith("up_blocks"):
+                block_id = int(name[len("up_blocks.")])
+                hidden_size = list(reversed(self.unet.config.block_out_channels))[block_id]
+            elif name.startswith("down_blocks"):
+                block_id = int(name[len("down_blocks.")])
+                hidden_size = self.unet.config.block_out_channels[block_id]
+
+            lora_attn_procs[name] = LoRAAttnProcessor(hidden_size=hidden_size, cross_attention_dim=cross_attention_dim)
+
+        self.unet.set_attn_processor(lora_attn_procs)
+
+
+    def use_xformers(self):
+        if is_xformers_available():
+            import xformers
+
+            xformers_version = version.parse(xformers.__version__)
+            if xformers_version == version.parse("0.0.16"):
+                logger.warn(
+                    "xFormers 0.0.16 cannot be used for training in some GPUs. If you observe problems during training, please update xFormers to at least 0.0.17. See https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
+                )
+            self.unet.enable_xformers_memory_efficient_attention()
+        else:
+            raise ValueError("xformers is not available. Make sure it is installed correctly")
+
+
+    def final_inference(self, seed, output_dir, num_validation_images, validation_prompt, epoch, accelerator):
+        # Load previous pipeline
+        pipeline = DiffusionPipeline.from_pretrained(
+            self.model_args.pretrained_model_name_or_path, revision=self.model_args.revision, torch_dtype=self.weight_dtype
+        )
+        pipeline = pipeline.to(accelerator.device)
+
+        # load attention processors
+        pipeline.unet.load_attn_procs(output_dir)
+
+        # run inference
+        generator = torch.Generator(device=accelerator.device).manual_seed(seed)
+        images = []
+        for _ in range(num_validation_images):
+            images.append(pipeline(validation_prompt, num_inference_steps=30, generator=generator).images[0])
+
+        if accelerator.is_main_process:
+            for tracker in accelerator.trackers:
+                if tracker.name == "tensorboard":
+                    np_images = np.stack([np.asarray(img) for img in images])
+                    tracker.writer.add_images("test", np_images, epoch, dataformats="NHWC")
+                if tracker.name == "wandb":
+                    tracker.log(
+                        {
+                            "test": [
+                                wandb.Image(image, caption=f"{i}: {validation_prompt}")
+                                for i, image in enumerate(images)
+                            ]
+                        }
+                )
+                        
+    def log_validation(self, args, accelerator, epoch):
+        if accelerator.is_main_process:
+            self.images = []
+            if self.model_args.use_ema and (self.model_args.use_lora == False):
+                # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
+                self.ema_unet.store(self.unet.parameters())
+                self.ema_unet.copy_to(self.unet.parameters())
+
+            if args.validation_prompts is not None and epoch % args.validation_epochs == 0:  
+                logger.info(
+                    f"Running validation... \n Generating {args.num_validation_images} images with prompt:"
+                    f" {args.validation_prompt}."
+                )
+                    
+                if self.model_args.use_lora:
+                    pipeline = DiffusionPipeline.from_pretrained(
+                        self.model_args.pretrained_model_name_or_path,
+                        unet=accelerator.unwrap_model(self.unet),
+                        revision=self.model_args.revision,
+                        torch_dtype=self.weight_dtype,
+                    )
+                else:
+                    pipeline = StableDiffusionPipeline.from_pretrained(
+                        self.model_args.pretrained_model_name_or_path,
+                        vae=accelerator.unwrap_model(self.vae),
+                        text_encoder=accelerator.unwrap_model(self.text_encoder),
+                        tokenizer=self.tokenizer,
+                        unet=accelerator.unwrap_model(self.unet),
+                        safety_checker=None,
+                        revision=self.model_args.revision,
+                        torch_dtype=self.weight_dtype,
+                    )
+                pipeline = pipeline.to(accelerator.device)
+                pipeline.set_progress_bar_config(disable=True)
+
+                if args.enable_xformers_memory_efficient_attention:
+                    pipeline.enable_xformers_memory_efficient_attention()
+
+                if args.seed is None:
+                    generator = None
+                else:
+                    generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+
+                self.images = []
+                for i in range(len(args.validation_prompts)):
+                    with torch.autocast("cuda"):
+                        image = pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0]
+
+                    self.images.append(image)
+
+                for tracker in accelerator.trackers:
+                    if tracker.name == "tensorboard":
+                        np_images = np.stack([np.asarray(img) for img in self.images])
+                        tracker.writer.add_images("validation", np_images, epoch, dataformats="NHWC")
+                    elif tracker.name == "wandb":
+                        tracker.log(
+                            {
+                                "validation": [
+                                    wandb.Image(image, caption=f"{i}: {args.validation_prompts[i]}")
+                                    for i, image in enumerate(self.images)
+                                ]
+                            }
+                        )
+                    else:
+                        logger.warn(f"image logging not implemented for {tracker.name}")
+                del pipeline
+                torch.cuda.empty_cache()
+
+            if self.model_args.use_ema and (self.model_args.use_lora == False):
+                # Switch back to the original UNet parameters.
+                self.ema_unet.restore(self.unet.parameters())
