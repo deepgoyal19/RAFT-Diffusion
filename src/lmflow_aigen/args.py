@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
-"""This script defines dataclasses: ModelArguments, FinetunerArguments InferenceAguments and DatasetArguments,
+"""This script defines dataclasses: ModelArguments, InferenceAguments and DatasetArguments,
 that contain the arguments for the model and dataset used in training.
 
 
@@ -18,9 +18,6 @@ import torch
 
 @dataclass
 class FinetunerArguments:
-        
-    validation_prompt: Optional[str] = field(
-        default=None, metadata={"help": "A prompt that is sampled during training for inference."})
     
     num_validation_images: int = field(
         default=4, metadata={"help": "Number of images that should be generated during validation with `validation_prompt`."})

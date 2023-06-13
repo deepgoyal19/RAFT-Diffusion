@@ -44,7 +44,7 @@ def main():
         mixed_precision="fp16",
         output_dir= 'output_dir_path',
         accelerate_device= 'cuda',
-        validation_prompt='pikachu',
+        validation_prompts='pikachu',
         resume_from_checkpoint='latest',
         num_validation_images=1,
         validation_epochs=60

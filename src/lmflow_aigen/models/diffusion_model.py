@@ -250,7 +250,7 @@ class DiffusionModel:
             raise ValueError("xformers is not available. Make sure it is installed correctly")
 
 
-    def final_inference(self, seed, output_dir, num_validation_images, validation_prompt, epoch, accelerator):
+    def final_inference(self, seed, output_dir, num_validation_images, validation_prompts, epoch, accelerator):
         # Load previous pipeline
         pipeline = DiffusionPipeline.from_pretrained(
             self.model_args.pretrained_model_name_or_path, revision=self.model_args.revision, torch_dtype=self.weight_dtype
@@ -264,7 +264,7 @@ class DiffusionModel:
         generator = torch.Generator(device=accelerator.device).manual_seed(seed)
         images = []
         for _ in range(num_validation_images):
-            images.append(pipeline(validation_prompt, num_inference_steps=30, generator=generator).images[0])
+            images.append(pipeline(validation_prompts, num_inference_steps=30, generator=generator).images[0])
 
         if accelerator.is_main_process:
             for tracker in accelerator.trackers:
@@ -275,7 +275,7 @@ class DiffusionModel:
                     tracker.log(
                         {
                             "test": [
-                                wandb.Image(image, caption=f"{i}: {validation_prompt}")
+                                wandb.Image(image, caption=f"{i}: {validation_prompts}")
                                 for i, image in enumerate(images)
                             ]
                         }
@@ -288,13 +288,11 @@ class DiffusionModel:
                 # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
                 self.ema_unet.store(self.unet.parameters())
                 self.ema_unet.copy_to(self.unet.parameters())
-
             if args.validation_prompts is not None and epoch % args.validation_epochs == 0:  
                 logger.info(
                     f"Running validation... \n Generating {args.num_validation_images} images with prompt:"
-                    f" {args.validation_prompt}."
+                    f" {args.validation_prompts}."
                 )
-                    
                 if self.model_args.use_lora:
                     pipeline = DiffusionPipeline.from_pretrained(
                         self.model_args.pretrained_model_name_or_path,
@@ -314,10 +312,10 @@ class DiffusionModel:
                         torch_dtype=self.weight_dtype,
                     )
                 pipeline = pipeline.to(accelerator.device)
-                pipeline.set_progress_bar_config(disable=True)
+                pipeline.set_progress_bar_config(disable=False)
 
-                if args.enable_xformers_memory_efficient_attention:
-                    pipeline.enable_xformers_memory_efficient_attention()
+                # if args.enable_xformers_memory_efficient_attention:
+                #     pipeline.enable_xformers_memory_efficient_attention()
 
                 if args.seed is None:
                     generator = None
@@ -326,10 +324,11 @@ class DiffusionModel:
 
                 self.images = []
                 for i in range(len(args.validation_prompts)):
-                    with torch.autocast("cuda"):
-                        image = pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0]
-
-                    self.images.append(image)
+                    if self.model_args.use_lora:
+                        with torch.autocast(device_type='cuda'):
+                            self.images.append(pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0])
+                    else:
+                        self.images.append(pipeline(args.validation_prompts[i], num_inference_steps=30, generator=generator).images[0])
 
                 for tracker in accelerator.trackers:
                     if tracker.name == "tensorboard":
@@ -346,6 +345,7 @@ class DiffusionModel:
                         )
                     else:
                         logger.warn(f"image logging not implemented for {tracker.name}")
+
                 del pipeline
                 torch.cuda.empty_cache()
 
