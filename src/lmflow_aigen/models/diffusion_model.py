@@ -119,17 +119,17 @@ class DiffusionModel:
             img_str += f"![img_{i}](./image_{i}.png)\n"
 
         yaml = f"""
-            ---
-            license: creativeml-openrail-m
-            base_model: {base_model}
-            tags:
-            - stable-diffusion
-            - stable-diffusion-diffusers
-            - text-to-image
-            - diffusers
-            - lora
-            inference: true
-            ---
+    ---
+    license: creativeml-openrail-m
+    base_model: {base_model}
+    tags:
+    - stable-diffusion
+    - stable-diffusion-diffusers
+    - text-to-image
+    - diffusers
+    - lora
+    inference: true
+    ---
         """
         model_card = f"""
             # LoRA text2image fine-tuning - {repo_id}
@@ -314,8 +314,8 @@ class DiffusionModel:
                 pipeline = pipeline.to(accelerator.device)
                 pipeline.set_progress_bar_config(disable=False)
 
-                # if args.enable_xformers_memory_efficient_attention:
-                #     pipeline.enable_xformers_memory_efficient_attention()
+                if args.enable_xformers_memory_efficient_attention:
+                    pipeline.enable_xformers_memory_efficient_attention()
 
                 if args.seed is None:
                     generator = None
@@ -325,10 +325,10 @@ class DiffusionModel:
                 self.images = []
                 for i in range(len(args.validation_prompts)):
                     if self.model_args.use_lora:
-                        with torch.autocast(device_type='cuda'):
-                            self.images.append(pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0])
+                        self.images.append(pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0])
                     else:
-                        self.images.append(pipeline(args.validation_prompts[i], num_inference_steps=30, generator=generator).images[0])
+                        with torch.autocast(device_type='cuda'):
+                            self.images.append(pipeline(args.validation_prompts[i], num_inference_steps=30, generator=generator).images[0])
 
                 for tracker in accelerator.trackers:
                     if tracker.name == "tensorboard":
