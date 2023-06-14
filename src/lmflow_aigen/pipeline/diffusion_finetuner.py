@@ -148,7 +148,8 @@ class DiffusionFinetuner(Finetuner):
 
         logging_dir = os.path.join(self.finetuner_args.output_dir, self.finetuner_args.logging_dir)
 
-        self.accelerator_project_config = ProjectConfiguration(total_limit=self.finetuner_args.checkpoints_total_limit)
+        self.accelerator_project_config = ProjectConfiguration(
+            total_limit=self.finetuner_args.checkpoints_total_limit, project_dir=self.finetuner_args.output_dir, logging_dir=logging_dir)
 
         Accelerator.device = torch.device(self.finetuner_args.accelerate_device)
         Accelerator.num_processes = self.finetuner_args.accelerate_num_processes
@@ -162,7 +163,6 @@ class DiffusionFinetuner(Finetuner):
             gradient_accumulation_steps=self.finetuner_args.gradient_accumulation_steps,
             mixed_precision=self.finetuner_args.mixed_precision,
             log_with=self.finetuner_args.report_to,
-            project_dir=logging_dir,
             project_config=self.accelerator_project_config,
         )
 
