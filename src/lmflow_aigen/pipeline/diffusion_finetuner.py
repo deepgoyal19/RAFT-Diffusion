@@ -290,12 +290,9 @@ class DiffusionFinetuner(Finetuner):
         
         
         if self.accelerator.is_main_process:
-            if self.model_args.use_lora:
-                self.accelerator.init_trackers("text2image-fine-tune", config=vars(self.finetuner_args))
-            else:
-                tracker_config = dict(vars(self.finetuner_args))
-                tracker_config.pop("validation_prompts")
-                self.accelerator.init_trackers(self.finetuner_args.tracker_project_name, tracker_config)
+            tracker_config = dict(vars(self.finetuner_args))
+            tracker_config.pop("validation_prompts")
+            self.accelerator.init_trackers(self.finetuner_args.tracker_project_name, tracker_config)
 
         # Train!
         total_batch_size = self.finetuner_args.train_batch_size * self.accelerator.num_processes * self.finetuner_args.gradient_accumulation_steps
@@ -443,16 +440,7 @@ class DiffusionFinetuner(Finetuner):
                     self.data_args.dataset_name
                     )
         
-        # Final inference (Only for LORA)
-        if self.model_args.use_lora: 
-                model.final_inference(
-                    self.finetuner_args.seed,
-                    self.finetuner_args.output_dir, 
-                    self.finetuner_args.num_validation_images,
-                    self.finetuner_args.validation_prompt,
-                    epoch,
-                    self.accelerator
-                    )
-
+        #Final Inference
+        model.log_validation(self.finetuner_args,self.accelerator,global_step)  
 
         self.accelerator.end_training()

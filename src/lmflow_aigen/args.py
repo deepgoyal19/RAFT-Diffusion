@@ -8,12 +8,6 @@ that contain the arguments for the model and dataset used in training.
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Union
-
-# from lmflow.args import ModelArguments,DatasetArguments, EvaluatorArguments, BenchmarkingArguments
-
-from dataclasses import dataclass, field
-from typing import Optional
-from diffusers import StableDiffusionPipeline
 import torch
 
 @dataclass
@@ -132,7 +126,7 @@ class FinetunerArguments:
             " for more docs"})
 
     
-    validation_prompts: Optional[str] = field(
+    validation_prompts: Optional[List[str]] = field(
         default= None, metadata= {"help": "A set of prompts evaluated every `validation_epochs` and logged to `report_to`."})
     
     

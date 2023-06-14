@@ -119,22 +119,22 @@ class DiffusionModel:
             img_str += f"![img_{i}](./image_{i}.png)\n"
 
         yaml = f"""
-    ---
-    license: creativeml-openrail-m
-    base_model: {base_model}
-    tags:
-    - stable-diffusion
-    - stable-diffusion-diffusers
-    - text-to-image
-    - diffusers
-    - lora
-    inference: true
-    ---
-        """
+---
+license: creativeml-openrail-m
+base_model: {base_model}
+tags:
+- stable-diffusion
+- stable-diffusion-diffusers
+- text-to-image
+- diffusers
+- lora
+inference: true
+---
+    """
         model_card = f"""
-            # LoRA text2image fine-tuning - {repo_id}
-            These are LoRA adaption weights for {base_model}. The weights were fine-tuned on the {dataset_name} dataset. You can find some example images in the following. \n
-            {img_str}
+# LoRA text2image fine-tuning - {repo_id}
+These are LoRA adaption weights for {base_model}. The weights were fine-tuned on the {dataset_name} dataset. You can find some example images in the following. \n
+{img_str}
         """
         with open(os.path.join(repo_folder, "README.md"), "w") as f:
             f.write(yaml + model_card)
@@ -248,38 +248,6 @@ class DiffusionModel:
             self.unet.enable_xformers_memory_efficient_attention()
         else:
             raise ValueError("xformers is not available. Make sure it is installed correctly")
-
-
-    def final_inference(self, seed, output_dir, num_validation_images, validation_prompts, epoch, accelerator):
-        # Load previous pipeline
-        pipeline = DiffusionPipeline.from_pretrained(
-            self.model_args.pretrained_model_name_or_path, revision=self.model_args.revision, torch_dtype=self.weight_dtype
-        )
-        pipeline = pipeline.to(accelerator.device)
-
-        # load attention processors
-        pipeline.unet.load_attn_procs(output_dir)
-
-        # run inference
-        generator = torch.Generator(device=accelerator.device).manual_seed(seed)
-        images = []
-        for _ in range(num_validation_images):
-            images.append(pipeline(validation_prompts, num_inference_steps=30, generator=generator).images[0])
-
-        if accelerator.is_main_process:
-            for tracker in accelerator.trackers:
-                if tracker.name == "tensorboard":
-                    np_images = np.stack([np.asarray(img) for img in images])
-                    tracker.writer.add_images("test", np_images, epoch, dataformats="NHWC")
-                if tracker.name == "wandb":
-                    tracker.log(
-                        {
-                            "test": [
-                                wandb.Image(image, caption=f"{i}: {validation_prompts}")
-                                for i, image in enumerate(images)
-                            ]
-                        }
-                )
                         
     def log_validation(self, args, accelerator, epoch):
         if accelerator.is_main_process:
@@ -322,7 +290,6 @@ class DiffusionModel:
                 else:
                     generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
 
-                self.images = []
                 for i in range(len(args.validation_prompts)):
                     if self.model_args.use_lora:
                         self.images.append(pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0])
