@@ -46,7 +46,6 @@ def main():
         accelerate_device= 'cuda',
         validation_prompts='pikachu',
         resume_from_checkpoint='latest',
-        num_validation_images=1,
         validation_epochs=60
     )
 

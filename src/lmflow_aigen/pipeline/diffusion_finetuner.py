@@ -441,6 +441,7 @@ class DiffusionFinetuner(Finetuner):
                     )
         
         #Final Inference
-        model.log_validation(self.finetuner_args,self.accelerator,global_step)  
+        if self.model_args.use_lora:
+            model.final_inference(self.finetuner_args, self.accelerator, global_step)  
 
         self.accelerator.end_training()

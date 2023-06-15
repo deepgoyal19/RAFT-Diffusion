@@ -194,6 +194,11 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 resume_step = resume_global_step % (num_update_steps_per_epoch * gradient_accumulation_steps)
 
                 return resume_from_checkpoint, global_step, first_epoch, resume_step
+        else:
+            resume_step = None
+            global_step = 0
+            first_epoch = 0
+            return resume_from_checkpoint, global_step, first_epoch, resume_step
 
     def set_weight_dtype(self, mixed_precision):
         self.weight_dtype = torch.float32
@@ -251,14 +256,13 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                         
     def log_validation(self, args, accelerator, epoch):
         if accelerator.is_main_process:
-            self.images = []
             if self.model_args.use_ema and (self.model_args.use_lora == False):
                 # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
                 self.ema_unet.store(self.unet.parameters())
                 self.ema_unet.copy_to(self.unet.parameters())
             if args.validation_prompts is not None and epoch % args.validation_epochs == 0:  
                 logger.info(
-                    f"Running validation... \n Generating {args.num_validation_images} images with prompt:"
+                    f"Running validation... \n Generating images with prompt:"
                     f" {args.validation_prompts}."
                 )
                 if self.model_args.use_lora:
@@ -289,6 +293,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                     generator = None
                 else:
                     generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+                self.images = []
 
                 for i in range(len(args.validation_prompts)):
                     if self.model_args.use_lora:
@@ -316,6 +321,46 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 del pipeline
                 torch.cuda.empty_cache()
 
-            if self.model_args.use_ema and (self.model_args.use_lora == False):
-                # Switch back to the original UNet parameters.
-                self.ema_unet.restore(self.unet.parameters())
+                if self.model_args.use_ema and (self.model_args.use_lora == False):
+                    # Switch back to the original UNet parameters.
+                    self.ema_unet.restore(self.unet.parameters())
+
+
+    def final_inference(self, args, accelerator, epoch):
+        pipeline = DiffusionPipeline.from_pretrained(
+            self.model_args.pretrained_model_name_or_path, revision=self.model_args.revision, torch_dtype=self.weight_dtype
+        )
+        pipeline = pipeline.to(accelerator.device)
+
+        # load attention processors
+        pipeline.unet.load_attn_procs(args.output_dir)
+
+        if args.enable_xformers_memory_efficient_attention:
+            pipeline.enable_xformers_memory_efficient_attention()
+
+        # run inference
+        generator = torch.Generator(device=accelerator.device)
+        if args.seed is not None:
+            generator = generator.manual_seed(args.seed)
+        images = []
+
+        for i in range(len(args.validation_prompts)):
+            images.append(pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0])
+        
+        if accelerator.is_main_process:
+            for tracker in accelerator.trackers:
+                if tracker.name == "tensorboard":
+                    np_images = np.stack([np.asarray(img) for img in images])
+                    tracker.writer.add_images("test", np_images, epoch, dataformats="NHWC")
+                if tracker.name == "wandb":
+                    tracker.log(
+                        {
+                            "test": [
+                                wandb.Image(image, caption=f"{i}: {args.validation_prompt}")
+                                for i, image in enumerate(images)
+                            ]
+                        }
+                    )
+
+        del pipeline
+        torch.cuda.empty_cache()

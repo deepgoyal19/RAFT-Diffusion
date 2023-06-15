@@ -13,9 +13,6 @@ import torch
 @dataclass
 class FinetunerArguments:
     
-    num_validation_images: int = field(
-        default=4, metadata={"help": "Number of images that should be generated during validation with `validation_prompt`."})
-    
     validation_epochs: int = field(
         default=1, metadata={"help": "Run fine-tuning validation every X epochs."})
     
