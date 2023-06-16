@@ -181,7 +181,7 @@ class DiffusionFinetuner(Finetuner):
                     raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
                 import wandb
 
-        logger.info(self.accelerator.state, main_process_only=False)
+        # logger.info(self.accelerator.state, main_process_only=False)
         if self.accelerator.is_local_main_process:
             datasets.utils.logging.set_verbosity_warning()
             transformers.utils.logging.set_verbosity_warning()
