@@ -59,7 +59,6 @@ class DiffusionModel:
             )
             self.vae = AutoencoderKL.from_pretrained(self.model_args.pretrained_model_name_or_path, subfolder="vae", revision=self.model_args.revision)
         else: 
-            # with ContextManagers(self.deepspeed_zero_init_disabled_context_manager()):
             self.text_encoder = CLIPTextModel.from_pretrained(
                 self.model_args.pretrained_model_name_or_path, subfolder="text_encoder", revision=self.model_args.revision
             )
@@ -143,8 +142,8 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
 
         repo_id = create_repo(
             repo_id=hub_model_id or Path(output_dir).name, exist_ok=True, token=hub_token
-        ).repo_id        
-        
+        ).repo_id
+
         if self.model_args.use_lora:
             self.save_model_card(
                 repo_id,
@@ -177,7 +176,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 accelerator.print(
                     f"Checkpoint '{resume_from_checkpoint}' does not exist. Starting a new training run."
                 )
-    # Deepanshu Comment: Please do check the return values
+ 
                 resume_from_checkpoint = None
                 resume_step = None
                 global_step = 0
@@ -317,9 +316,10 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                         )
                     else:
                         logger.warn(f"image logging not implemented for {tracker.name}")
-
                 del pipeline
                 torch.cuda.empty_cache()
+            else:
+                self.images=[]
 
                 if self.model_args.use_ema and (self.model_args.use_lora == False):
                     # Switch back to the original UNet parameters.

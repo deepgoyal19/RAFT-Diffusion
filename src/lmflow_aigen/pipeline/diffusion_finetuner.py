@@ -137,8 +137,6 @@ class DiffusionFinetuner(Finetuner):
             datefmt="%m/%d/%Y %H:%M:%S",
             level=logging.INFO,
         )
-    
-        # logger.info(f"Training parameters {finetuner_args}")
 
         # If passed along, set the training seed now.
         if self.finetuner_args.seed is not None:
@@ -151,7 +149,6 @@ class DiffusionFinetuner(Finetuner):
         self.accelerator_project_config = ProjectConfiguration(
             total_limit=self.finetuner_args.checkpoints_total_limit, project_dir=self.finetuner_args.output_dir, logging_dir=logging_dir)
 
-        Accelerator.device = torch.device(self.finetuner_args.accelerate_device)
         Accelerator.num_processes = self.finetuner_args.accelerate_num_processes
         Accelerator.process_index = self.finetuner_args.accelerate_process_index
         Accelerator.sync_gradients = self.finetuner_args.accelerate_sync_gradients
@@ -166,6 +163,12 @@ class DiffusionFinetuner(Finetuner):
             project_config=self.accelerator_project_config,
         )
 
+        with ContextManagers(self.deepspeed_zero_init_disabled_context_manager()):
+            if self.model_args.use_ema and (self.model_args.use_lora == False):
+                model.vae=model.vae
+                model.text_encoder=model.text_encoder
+
+
         # For mixed precision training we cast the text_encoder and vae weights to half-precision
         # as these models are only used for inference, keeping weights in full precision is not required.
         model.set_weight_dtype(self.accelerator.mixed_precision)
@@ -178,8 +181,7 @@ class DiffusionFinetuner(Finetuner):
                     raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
                 import wandb
 
-        # logger.info(self.accelerator.state, main_process_only=False)
-        logger.info(self.accelerator.state)
+        logger.info(self.accelerator.state, main_process_only=False)
         if self.accelerator.is_local_main_process:
             datasets.utils.logging.set_verbosity_warning()
             transformers.utils.logging.set_verbosity_warning()
@@ -441,7 +443,7 @@ class DiffusionFinetuner(Finetuner):
                     )
         
         #Final Inference
-        if self.model_args.use_lora:
+        if self.model_args.use_lora and self.finetuner_args.validation_prompts:
             model.final_inference(self.finetuner_args, self.accelerator, global_step)  
 
         self.accelerator.end_training()

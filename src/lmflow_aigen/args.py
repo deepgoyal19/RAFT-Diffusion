@@ -145,14 +145,10 @@ class FinetunerArguments:
         default= "tensorboard", metadata= {"help": 'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'})
     
-    accelerate_device: str = field(
-        default="cuda" if torch.cuda.is_available() else "cpu", metadata={"description": "The device to use."})
     
     accelerate_local_process_index: int = field(
         default=0, metadata={"description": "The process index on the current machine."})
     
-    # accelerate_mixed_precision: str = field(
-    #     default="no", metadata={"description": "The configured mixed precision mode."})
     
     accelerate_num_processes: int = field(
         default=1, metadata={"description": "The total number of processes used for training."})
@@ -168,10 +164,7 @@ class FinetunerArguments:
     
     accelerate_use_distributed: bool = field(
         default=False, metadata={"description": "Whether the current configuration is for distributed training."})
-    
-    # distributed_type: DistributedType = field(
-    #     default=DistributedType.NONE,
-    #     metadata={"description": "The distributed training configuration."})
+
     
 @dataclass 
 class ModelArguments:
