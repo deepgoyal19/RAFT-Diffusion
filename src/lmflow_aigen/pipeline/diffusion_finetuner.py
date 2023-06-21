@@ -227,7 +227,7 @@ class DiffusionFinetuner(Finetuner):
 
         if self.finetuner_args.scale_lr:
             self.finetuner_args.learning_rate = (
-                self.finetuner_args.learning_rate * self.finetuner_args.gradient_accumulation_steps * self.finetuner_args.train_batch_size * self.accelerator.num_processes
+                self.finetuner_args.learning_rate * self.finetuner_args.gradient_accumulation_steps * self.dataset_args.train_batch_size * self.accelerator.num_processes
             )
 
         # Initialize the optimizer
@@ -253,7 +253,7 @@ class DiffusionFinetuner(Finetuner):
 
         # Get training dataset and training dataloader
         train_dataset = dataset.train_dataset(self.accelerator, self.finetuner_args.seed, self.finetuner_args.max_train_samples, model.tokenizer)
-        train_dataloader = dataset.train_dataloader(self.finetuner_args.train_batch_size)
+        train_dataloader = dataset.train_dataloader(self.dataset_args.train_batch_size)
 
         # Scheduler and math around the number of training steps.
         overrode_max_train_steps = False
@@ -297,12 +297,12 @@ class DiffusionFinetuner(Finetuner):
             self.accelerator.init_trackers(self.finetuner_args.tracker_project_name, tracker_config)
 
         # Train!
-        total_batch_size = self.finetuner_args.train_batch_size * self.accelerator.num_processes * self.finetuner_args.gradient_accumulation_steps
+        total_batch_size = self.dataset_args.train_batch_size * self.accelerator.num_processes * self.finetuner_args.gradient_accumulation_steps
 
         logger.info("***** Running training *****")
         logger.info(f"  Num examples = {len(train_dataset)}")
         logger.info(f"  Num Epochs = {self.finetuner_args.num_train_epochs}")
-        logger.info(f"  Instantaneous batch size per device = {self.finetuner_args.train_batch_size}")
+        logger.info(f"  Instantaneous batch size per device = {self.dataset_args.train_batch_size}")
         logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
         logger.info(f"  Gradient Accumulation steps = {self.finetuner_args.gradient_accumulation_steps}")
         logger.info(f"  Total optimization steps = {self.finetuner_args.max_train_steps}")
@@ -392,7 +392,7 @@ class DiffusionFinetuner(Finetuner):
                         loss = loss.mean()
 
                     # Gather the losses across all processes for logging (if we use distributed training).
-                    avg_loss = self.accelerator.gather(loss.repeat(self.finetuner_args.train_batch_size)).mean()
+                    avg_loss = self.accelerator.gather(loss.repeat(self.dataset_args.train_batch_size)).mean()
                     train_loss += avg_loss.item() / self.finetuner_args.gradient_accumulation_steps
 
                     # Backpropagate

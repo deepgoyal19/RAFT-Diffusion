@@ -26,9 +26,6 @@ class FinetunerArguments:
     seed: Optional[int] = field(
         default=None, metadata={"help": "A seed for reproducible training."})
     
-    train_batch_size: int = field(
-        default=16, metadata={"help": "Batch size (per device for the training dataloader."})
-    
     num_train_epochs: int = field(
         default=100, metadata={"help": "Number of training epochs."})
     
@@ -308,7 +305,8 @@ class DatasetArguments:
         default=512, metadata={"help": "The resolution for input images, all the images in the train/validation dataset will be resized to this resolution"})
     
     center_crop: bool = field(
-        default=False, metadata={"help": "Whether to center crop the input images to the resolution. If not set, the images will be randomly cropped. The images will be resized to the resolution first before cropping."})
+        default=False, metadata={"help": "Whether to center crop the input images to the resolution."
+                                 "If not set, the images will be randomly cropped. The images will be resized to the resolution first before cropping."})
     
     random_flip: bool = field(
         default=False, metadata={"help": "Whether to randomly flip images horizontally"})
@@ -316,8 +314,24 @@ class DatasetArguments:
     cache_dir: Optional[str] = field(
         default=None, metadata={"help": "The directory where the downloaded models and datasets will be stored."})
 
+    train_batch_size: int = field(
+        default=16, metadata={"help": "Batch size (per device for the training dataloader."})
+
 @dataclass
-class RaftAlignterArguments:
+class RaftFinetunerArguments:
+
+    clip_model_pretrained_or_path: str = field(
+        default= 'ViT-L-14', metadata={"help":  "Path to pretrained clip model or clip model identifier from huggingface.co/model"} )
 
     topk: int = field(
         default=1, metadata={"help": ""})
+    
+    raft_batch_size: int = field(
+    default=16, metadata={"help": "Batch size (per device for the training dataloader."})
+
+    score_model: str= field(
+        default="aesthetic", metdata={"help": "Score model to ...", "choices":['aesthetic','clip','pick']})
+    
+    pickscore_processor_name_or_path: Optional[str] = field(
+        default= None, metadata={"help": "Path to pretrained autoprocessor model or model identifier from huggingface.co/models for pickscore."}
+    )

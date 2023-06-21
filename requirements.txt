@@ -1,1 +1,6 @@
 torch>=2.0
+open-clip-torch
+transformers
+accelerate 
+diffusers
+xformers

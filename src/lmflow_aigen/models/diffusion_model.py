@@ -10,7 +10,7 @@ from pathlib import Path
 import accelerate
 import torch
 from huggingface_hub import create_repo, upload_folder
-from transformers import CLIPTextModel, CLIPTokenizer
+from transformers import CLIPTextModel, CLIPTokenizer, AutoProcessor, AutoModel
 from transformers.utils import ContextManagers
 from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel, StableDiffusionPipeline
 from diffusers.training_utils import EMAModel
@@ -19,7 +19,12 @@ from diffusers.models.attention_processor import LoRAAttnProcessor
 from diffusers.utils.import_utils import is_xformers_available
 from packaging import version
 import numpy as np 
-
+from transformers import CLIPProcessor, CLIPModel
+from os.path import expanduser  # pylint: disable=import-outside-toplevel
+from urllib.request import urlretrieve  # pylint: disable=import-outside-toplevel
+import torch.nn as nn
+import open_clip
+import clip
 if is_wandb_available():
     import wandb
 
@@ -147,7 +152,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
         if self.model_args.use_lora:
             self.save_model_card(
                 repo_id,
-                images=self.images,
+                images=self.validation_images,
                 base_model=self.model_args.pretrained_model_name_or_path,
                 dataset_name=dataset_name,
                 repo_folder=output_dir,
@@ -264,24 +269,9 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                     f"Running validation... \n Generating images with prompt:"
                     f" {args.validation_prompts}."
                 )
-                if self.model_args.use_lora:
-                    pipeline = DiffusionPipeline.from_pretrained(
-                        self.model_args.pretrained_model_name_or_path,
-                        unet=accelerator.unwrap_model(self.unet),
-                        revision=self.model_args.revision,
-                        torch_dtype=self.weight_dtype,
-                    )
-                else:
-                    pipeline = StableDiffusionPipeline.from_pretrained(
-                        self.model_args.pretrained_model_name_or_path,
-                        vae=accelerator.unwrap_model(self.vae),
-                        text_encoder=accelerator.unwrap_model(self.text_encoder),
-                        tokenizer=self.tokenizer,
-                        unet=accelerator.unwrap_model(self.unet),
-                        safety_checker=None,
-                        revision=self.model_args.revision,
-                        torch_dtype=self.weight_dtype,
-                    )
+                
+                pipeline = self.load_model_pipeline(accelerator)
+                
                 pipeline = pipeline.to(accelerator.device)
                 pipeline.set_progress_bar_config(disable=False)
 
@@ -292,25 +282,25 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                     generator = None
                 else:
                     generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
-                self.images = []
+                self.validation_images = []
 
                 for i in range(len(args.validation_prompts)):
                     if self.model_args.use_lora:
-                        self.images.append(pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0])
+                        self.validation_images.append(pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0])
                     else:
                         with torch.autocast(device_type='cuda'):
-                            self.images.append(pipeline(args.validation_prompts[i], num_inference_steps=30, generator=generator).images[0])
+                            self.validation_images.append(pipeline(args.validation_prompts[i], num_inference_steps=30, generator=generator).images[0])
 
                 for tracker in accelerator.trackers:
                     if tracker.name == "tensorboard":
-                        np_images = np.stack([np.asarray(img) for img in self.images])
+                        np_images = np.stack([np.asarray(img) for img in self.validation_images])
                         tracker.writer.add_images("validation", np_images, epoch, dataformats="NHWC")
                     elif tracker.name == "wandb":
                         tracker.log(
                             {
                                 "validation": [
                                     wandb.Image(image, caption=f"{i}: {args.validation_prompts[i]}")
-                                    for i, image in enumerate(self.images)
+                                    for i, image in enumerate(self.validation_images)
                                 ]
                             }
                         )
@@ -319,12 +309,32 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 del pipeline
                 torch.cuda.empty_cache()
             else:
-                self.images=[]
+                self.validation_images=[]
 
                 if self.model_args.use_ema and (self.model_args.use_lora == False):
                     # Switch back to the original UNet parameters.
                     self.ema_unet.restore(self.unet.parameters())
-
+    
+    def load_model_pipeline(self, accelerator):
+        if self.model_args.use_lora:
+            pipeline = DiffusionPipeline.from_pretrained(
+                self.model_args.pretrained_model_name_or_path,
+                unet=accelerator.unwrap_model(self.unet),
+                revision=self.model_args.revision,
+                torch_dtype=self.weight_dtype,
+            )
+        else:
+            pipeline = StableDiffusionPipeline.from_pretrained(
+                self.model_args.pretrained_model_name_or_path,
+                vae=accelerator.unwrap_model(self.vae),
+                text_encoder=accelerator.unwrap_model(self.text_encoder),
+                tokenizer=self.tokenizer,
+                unet=accelerator.unwrap_model(self.unet),
+                safety_checker=None,
+                revision=self.model_args.revision,
+                torch_dtype=self.weight_dtype,
+            )
+        return pipeline
 
     def final_inference(self, args, accelerator, epoch):
         pipeline = DiffusionPipeline.from_pretrained(
@@ -364,3 +374,100 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
 
         del pipeline
         torch.cuda.empty_cache()
+
+    def load_score_model(self, score_model_pretrained_name_or_path, score_model_name, pickscore_processor_name_or_path="laion/CLIP-ViT-H-14-laion2B-s32B-b79K"):
+        self.score_model_name=score_model_name
+        if self.score_model_name=="aesthetic":  
+            self.score_model, _, self.score_preprocess = open_clip.create_model_and_transforms(score_model_pretrained_name_or_path, pretrained='openai', device=device)
+            self.score_amodel= self.get_aesthetic_model(self, clip_model=score_model_pretrained_name_or_path).eval().to(device)
+        elif self.score_model_name=='clip':
+            self.score_model, self.score_preprocess = clip.load(score_model_pretrained_name_or_path, device=device)
+        elif self.score_model_name=="pick":
+            self.score_processor = AutoProcessor.from_pretrained(pickscore_processor_name_or_path).to(device)
+            self.score_model = AutoModel.from_pretrained(score_model_pretrained_name_or_path).eval().to(device)
+        else:
+            raise ValueError("Score model should be either 'aesthetic', 'clip', or 'pick'.")
+
+    def get_score(self, image, text=None):
+        if  self.score_model_name=="aesthetic":   
+            image = self.score_preprocess(image).unsqueeze(0).to(device)
+
+            with torch.no_grad():
+                image_features = self.score_model.encode_image(image)
+                image_features /= image_features.norm(dim=-1, keepdim=True)
+                score = float(self.score_amodel(image_features))
+            return score
+        elif self.score_model_name=='clip':
+            image = self.score_preprocess(image).unsqueeze(0).to(device)
+            text = clip.tokenize(text).to(device)
+            with torch.no_grad():
+                image_features = self.score_model.encode_image(image)
+                text_features = self.score_model.encode_text(text)
+                
+                logits_per_image, logits_per_text = self.score_model(image, text)
+                score = float(logits_per_image)
+                return score
+        elif self.score_model_name=='pick':                
+            # preprocess
+            image_inputs = self.score_processor(
+                images=image,
+                padding=True,
+                truncation=True,
+                max_length=77,
+                return_tensors="pt",
+            ).to(device)
+            
+            text_inputs = self.score_processor(
+                text=text,
+                padding=True,
+                truncation=True,
+                max_length=77,
+                return_tensors="pt",
+            ).to(device)
+
+            with torch.no_grad():
+                # embed
+                image_embs =  self.score_model.get_image_features(**image_inputs)
+                image_embs = image_embs / torch.norm(image_embs, dim=-1, keepdim=True)
+            
+                text_embs = self.score_model.get_text_features(**text_inputs)
+                text_embs = text_embs / torch.norm(text_embs, dim=-1, keepdim=True)
+            
+                # score
+                score = float(self.score_model.logit_scale.exp() * (text_embs @ image_embs.T)[0])
+                
+                # get probabilities if you have multiple images to choose from
+                # score = torch.softmax(scores, dim=-1)                
+            return score
+
+    def get_aesthetic_model(self, clip_model="vit_l_14"):
+        """load the aethetic model"""
+        home = expanduser("~")
+        cache_folder = home + "/.cache/emb_reader"
+        path_to_model = cache_folder + "/sa_0_4_"+clip_model+"_linear.pth"
+        if not os.path.exists(path_to_model):
+            os.makedirs(cache_folder, exist_ok=True)
+            url_model = (
+                "https://github.com/LAION-AI/aesthetic-predictor/blob/main/sa_0_4_"+clip_model+"_linear.pth?raw=true"
+            )
+            urlretrieve(url_model, path_to_model)
+        if clip_model == "vit_l_14":
+            m = nn.Linear(768, 1)
+        elif clip_model == "vit_b_32":
+            m = nn.Linear(512, 1)
+        else:
+            raise ValueError()
+        s = torch.load(path_to_model)
+        m.load_state_dict(s)
+        m.eval()
+        return m
+    
+    def preprocess_image(self,image_list,index,prompt):
+        score_list=[]
+        for image in image_list:
+            score_list.append(self.get_score(image,prompt))
+        torch.cuda.empty_cache()
+        image_scores=[row[0] for row in score_list]
+        score_list = sorted(score_list, key=lambda x: x[1], reverse=True)[:1]
+
+        return [score_list[0][1],score_list[0][0],image_scores.index(score_list[0][0])]
