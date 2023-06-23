@@ -14,7 +14,7 @@ import os
 import random
 import numpy as np
 import torch
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 from torchvision import transforms
 
 class Dataset:
@@ -42,52 +42,43 @@ class Dataset:
         # download the dataset.
         if self.data_args.dataset_name is not None:
             # Downloading and loading a dataset from the hub.
-            self.dataset = load_dataset(
+            self.inference_dataset = load_dataset(
                 self.data_args.dataset_name,
                 self.data_args.dataset_config_name,
                 cache_dir=self.data_args.cache_dir,
             )
-        else:
-            data_files = {}
-            if self.data_args.train_data_dir is not None:
-                data_files["train"] = os.path.join(self.data_args.train_data_dir, "**")
-            self.dataset = load_dataset(
-                "imagefolder",
-                data_files=data_files,
+        elif  self.data_args.train_data_dir is not None:
+            self.inference_dataset = load_dataset(
+                "text",
+                data_dir=self.data_args.train_data_dir,
                 cache_dir=self.data_args.cache_dir,
-            )
-            # See more about loading custom images at
-            # https://huggingface.co/docs/datasets/v2.4.0/en/image_load#imagefolder
+                )
+        else:
+            raise ValueError('Pease specify the name of the dataset or provide the path to a folder that includes a text file.')
+
+    def inference_dataloader(self,batch_size):
+        dataloader=torch.utils.data.DataLoader(
+            self.inference_dataset['train'],
+            shuffle=False,
+            batch_size=batch_size)
+        return dataloader
+    
+    def prepare_finetune_dataset(self, images, texts):
+        # Get the datasets: you can either provide your own training and evaluation files (see below)
+        # or specify a Dataset from the hub (the dataset will be downloaded automatically from the datasets Hub).
+
+        # In distributed training, the load_dataset function guarantees that only one local process can concurrently
+        # download the dataset.
+        self.dataset=Dataset.from_dict({"image": images, "text":texts})
 
         # Preprocessing the datasets.
         # We need to tokenize inputs and targets.  
-        column_names = self.dataset["train"].column_names
-            
-        DATASET_NAME_MAPPING = {
-            "lambdalabs/pokemon-blip-captions": ("image", "text"),
-        }
 
-        # Get the column names for input/target
-        dataset_columns = DATASET_NAME_MAPPING.get(self.data_args.dataset_name, None)
-        
-        if self.data_args.image_column is None:
-            self.image_column = dataset_columns[0] if dataset_columns is not None else column_names[0]
-        else:
-            self.image_column = self.data_args.image_column
-            if self.image_column not in column_names:
-                raise ValueError(
-                    f"--image_column' value '{self.data_args.image_column}' needs to be one of: {', '.join(column_names)}"
-                )
+        column_names = self.dataset.column_names
 
+        self.image_column = column_names[0]
 
-        if self.data_args.caption_column is None:
-            self.caption_column = dataset_columns[1] if dataset_columns is not None else column_names[1]
-        else:
-            self.caption_column = self.data_args.caption_column
-            if self.caption_column not in column_names:
-                raise ValueError(
-                    f"--caption_column' value '{self.data_args.caption_column}' needs to be one of: {', '.join(self.column_names)}"
-                )
+        self.caption_column = column_names[1]
 
         # Preprocessing the datasets.
         self.train_transforms = transforms.Compose(
@@ -134,9 +125,9 @@ class Dataset:
 
         with accelerator.main_process_first():
             if max_train_samples is not None:
-                self.data_args.dataset["train"] = self.data_args.dataset["train"].shuffle(seed=seed).select(range(max_train_samples))
+                self.dataset = self.dataset.shuffle(seed=seed).select(range(max_train_samples))
             # Set the training transforms
-            self.train_dataset = self.dataset["train"].with_transform(self.preprocess_train)
+            self.train_dataset = self.dataset.with_transform(self.preprocess_train)
             return self.train_dataset
 
     def train_dataloader(self, train_batch_size):

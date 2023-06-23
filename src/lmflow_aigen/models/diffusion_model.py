@@ -462,12 +462,9 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
         m.eval()
         return m
     
-    def preprocess_image(self,image_list,index,prompt):
-        score_list=[]
-        for image in image_list:
-            score_list.append(self.get_score(image,prompt))
-        torch.cuda.empty_cache()
-        image_scores=[row[0] for row in score_list]
-        score_list = sorted(score_list, key=lambda x: x[1], reverse=True)[:1]
-
-        return [score_list[0][1],score_list[0][0],image_scores.index(score_list[0][0])]
+    def preprocess_image(self, images, index, text):
+        scores=[]
+        for image in images:
+            scores.append(self.get_score(image,text))
+        max_score=max(scores)
+        return [max_score,scores.index(max_score)]

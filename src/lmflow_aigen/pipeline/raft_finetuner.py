@@ -14,8 +14,10 @@ class RaftFinetuner:
         #Load Score Model
         model.load_score_model(self.raft_args.clip_model_pretrianed_or_path)
 
-
-        for step, prompts in enumerate(dataset.train_dataloader):
+        inference_dataloader=dataset.inference_dataloader(self.raft_args.inference_batch_size)
+        training_prompts=[]
+        for step, prompts in enumerate(inference_dataloader):
+            prompts=prompts['text']
             # Generating Images
             images=self.pipeline( 
                 prompts,
@@ -34,12 +36,17 @@ class RaftFinetuner:
             # Get Aesthetic scores and CLIP scores of images
             with concurrent.futures.ThreadPoolExecutor(max_workers= self.raft_args.max_workers) as executor:
                 step_list=[i for i in range(step*self.raft_args.raft_batch_size,(step+1)*self.raft_args.raft_batch_size)]
-                score_index=executor.map(model.get_score,image_list,step_list,prompt_list)
+                score_index=executor.map(model.get_score,image_list,step_list,prompts)
 
-            iterator=0
-            for max_scores in score_index:
-                training_prompts.append([max_scores[0],max_scores[1],image_list[iterator][max_scores[2]],prompt_list[iterator]])
-                iterator+=1
+            for iterator,max_scores in enumerate(score_index):
+                print(iterator)
+                training_prompts.append([max_scores[0],image_list[iterator][max_scores[1]],prompts[iterator]])
+
+        training_prompts=[row[1:3] for row in sorted(training_prompts,key=lambda x: (x[0]),reverse=True)[:1]]
+
+        images = [row[0] for row in training_prompts]
+        texts = [row[1] for row in training_prompts]
+
+        dataset.prepare_finetune_dataset(images, texts)
 
 
-        model.get_text_image_score()
