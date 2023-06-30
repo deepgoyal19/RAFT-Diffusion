@@ -17,7 +17,7 @@ import torch
 from datasets import load_dataset, Dataset
 from torchvision import transforms
 
-class Dataset:
+class ImageDataset:
     r"""
     Initializes the Dataset object with the given parameters.
 
@@ -56,6 +56,7 @@ class Dataset:
         else:
             raise ValueError('Pease specify the name of the dataset or provide the path to a folder that includes a text file.')
 
+
     def inference_dataloader(self,batch_size):
         dataloader=torch.utils.data.DataLoader(
             self.inference_dataset['train'],
@@ -69,7 +70,7 @@ class Dataset:
 
         # In distributed training, the load_dataset function guarantees that only one local process can concurrently
         # download the dataset.
-        self.dataset=Dataset.from_dict({"image": images, "text":texts})
+        self.dataset=Dataset.from_dict({"image": images, "text": texts})
 
         # Preprocessing the datasets.
         # We need to tokenize inputs and targets.  
@@ -127,13 +128,13 @@ class Dataset:
             if max_train_samples is not None:
                 self.dataset = self.dataset.shuffle(seed=seed).select(range(max_train_samples))
             # Set the training transforms
-            self.train_dataset = self.dataset.with_transform(self.preprocess_train)
-            return self.train_dataset
+            self.training_dataset = self.dataset.with_transform(self.preprocess_train)
+            return self.training_dataset
 
     def train_dataloader(self, train_batch_size):
         # DataLoaders creation:
         train_dataloader = torch.utils.data.DataLoader(
-            self.train_dataset,
+            self.training_dataset,
             shuffle=True,
             collate_fn=self.collate_fn,
             batch_size=train_batch_size,

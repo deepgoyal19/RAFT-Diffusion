@@ -290,13 +290,7 @@ class DatasetArguments:
                     " https://huggingface.co/docs/datasets/image_dataset#imagefolder. In particular, a `metadata.jsonl` file"
                     " must exist to provide the captions for the images. Ignored if `dataset_name` is specified."
         })
-    
-    image_column: str = field(
-        default="image", metadata={"help": "The column of the dataset containing an image."})
-    
-    caption_column: str = field(
-        default="text", metadata={"help": "The column of the dataset containing a caption or a list of captions."})
-    
+        
     #Deepanshu Comments: Should this be in finetunerArgs or DatasetArgs
     dataloader_num_workers: int = field(
         default=0, metadata={"help": "Number of subprocesses to use for data loading."})
@@ -321,7 +315,8 @@ class DatasetArguments:
 class RaftFinetunerArguments:
 
     clip_model_pretrained_or_path: str = field(
-        default= 'ViT-L-14', metadata={"help":  "Path to pretrained clip model or clip model identifier from huggingface.co/model"} )
+        default= 'ViT-L-14', metadata={"help":  "Path to pretrained clip model or clip model identifier from huggingface.co/model",
+                                        "choices":{'aesthetic':['ViT-B-32','ViT-B-16','ViT-L-14']}} )
 
     topk: int = field(
         default=1, metadata={"help": ""})
@@ -330,8 +325,26 @@ class RaftFinetunerArguments:
     default=16, metadata={"help": "Batch size (per device for the training dataloader."})
 
     score_model: str= field(
-        default="aesthetic", metdata={"help": "Score model to ...", "choices":['aesthetic','clip','pick']})
+        default="aesthetic", metadata={"help": "Score model to ...", "choices":['aesthetic','clip','pick']})
     
     pickscore_processor_name_or_path: Optional[str] = field(
-        default= None, metadata={"help": "Path to pretrained autoprocessor model or model identifier from huggingface.co/models for pickscore."}
+        default= None, metadata={"help": "Path to pretrained autoprocessor model or model identifier from huggingface.co/models for pickscore."})
+    
+    inference_batch_size: int = field(
+        default=3, metadata={'help':''}
+    )
+
+    num_images_per_prompt: int= field(
+        default=2, metadata={"help":""})
+
+    max_workers: int= field(
+        default=3, metadata={"help":"Define max_wokers for mutliprocessing"}
+    )
+
+    epochs: int= field(
+        default=3, metadata={"help":""}
+    )
+
+    topk: int= field(
+        default=1, metadata={"help":""}
     )

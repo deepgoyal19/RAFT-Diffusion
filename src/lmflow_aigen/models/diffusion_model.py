@@ -58,18 +58,11 @@ class DiffusionModel:
             self.model_args.pretrained_model_name_or_path, subfolder="tokenizer", revision=self.model_args.revision
         )
 
-        if self.model_args.use_lora:
-            self.text_encoder = CLIPTextModel.from_pretrained(
-                self.model_args.pretrained_model_name_or_path, subfolder="text_encoder", revision=self.model_args.revision
-            )
-            self.vae = AutoencoderKL.from_pretrained(self.model_args.pretrained_model_name_or_path, subfolder="vae", revision=self.model_args.revision)
-        else: 
-            self.text_encoder = CLIPTextModel.from_pretrained(
-                self.model_args.pretrained_model_name_or_path, subfolder="text_encoder", revision=self.model_args.revision
-            )
-            self.vae = AutoencoderKL.from_pretrained(
-                self.model_args.pretrained_model_name_or_path, subfolder="vae", revision=self.model_args.revision
-            )
+
+        self.text_encoder = CLIPTextModel.from_pretrained(
+            self.model_args.pretrained_model_name_or_path, subfolder="text_encoder", revision=self.model_args.revision
+        )
+        self.vae = AutoencoderKL.from_pretrained(self.model_args.pretrained_model_name_or_path, subfolder="vae", revision=self.model_args.revision)
 
         self.unet = UNet2DConditionModel.from_pretrained(
             self.model_args.pretrained_model_name_or_path, subfolder="unet", revision=self.model_args.non_ema_revision
@@ -176,7 +169,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 dirs = [d for d in dirs if d.startswith("checkpoint")]
                 dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
                 path = dirs[-1] if len(dirs) > 0 else None
-
+                print(path)
             if path is None:
                 accelerator.print(
                     f"Checkpoint '{resume_from_checkpoint}' does not exist. Starting a new training run."
@@ -334,6 +327,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 revision=self.model_args.revision,
                 torch_dtype=self.weight_dtype,
             )
+        pipeline.to(accelerator.device)
         return pipeline
 
     def final_inference(self, args, accelerator, epoch):
@@ -375,11 +369,13 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
         del pipeline
         torch.cuda.empty_cache()
 
-    def load_score_model(self, score_model_pretrained_name_or_path, score_model_name, pickscore_processor_name_or_path="laion/CLIP-ViT-H-14-laion2B-s32B-b79K"):
+    def load_score_model(self, score_model_pretrained_name_or_path, score_model_name,device, pickscore_processor_name_or_path="laion/CLIP-ViT-H-14-laion2B-s32B-b79K"):
         self.score_model_name=score_model_name
+        self.device=device
         if self.score_model_name=="aesthetic":  
             self.score_model, _, self.score_preprocess = open_clip.create_model_and_transforms(score_model_pretrained_name_or_path, pretrained='openai', device=device)
-            self.score_amodel= self.get_aesthetic_model(self, clip_model=score_model_pretrained_name_or_path).eval().to(device)
+            clip_model=score_model_pretrained_name_or_path.lower().replace('-','_')
+            self.score_amodel= self.get_aesthetic_model(clip_model).eval().to(device)
         elif self.score_model_name=='clip':
             self.score_model, self.score_preprocess = clip.load(score_model_pretrained_name_or_path, device=device)
         elif self.score_model_name=="pick":
@@ -390,7 +386,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
 
     def get_score(self, image, text=None):
         if  self.score_model_name=="aesthetic":   
-            image = self.score_preprocess(image).unsqueeze(0).to(device)
+            image = self.score_preprocess(image).unsqueeze(0).to(self.device)
 
             with torch.no_grad():
                 image_features = self.score_model.encode_image(image)
@@ -398,8 +394,8 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 score = float(self.score_amodel(image_features))
             return score
         elif self.score_model_name=='clip':
-            image = self.score_preprocess(image).unsqueeze(0).to(device)
-            text = clip.tokenize(text).to(device)
+            image = self.score_preprocess(image).unsqueeze(0).to(self.device)
+            text = clip.tokenize(text).to(self.device)
             with torch.no_grad():
                 image_features = self.score_model.encode_image(image)
                 text_features = self.score_model.encode_text(text)
@@ -415,7 +411,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 truncation=True,
                 max_length=77,
                 return_tensors="pt",
-            ).to(device)
+            ).to(self.device)
             
             text_inputs = self.score_processor(
                 text=text,
@@ -423,7 +419,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 truncation=True,
                 max_length=77,
                 return_tensors="pt",
-            ).to(device)
+            ).to(self.device)
 
             with torch.no_grad():
                 # embed
@@ -450,6 +446,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
             url_model = (
                 "https://github.com/LAION-AI/aesthetic-predictor/blob/main/sa_0_4_"+clip_model+"_linear.pth?raw=true"
             )
+            print(url_model)
             urlretrieve(url_model, path_to_model)
         if clip_model == "vit_l_14":
             m = nn.Linear(768, 1)
@@ -462,7 +459,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
         m.eval()
         return m
     
-    def preprocess_image(self, images, index, text):
+    def preprocess_image(self, images, text):
         scores=[]
         for image in images:
             scores.append(self.get_score(image,text))
