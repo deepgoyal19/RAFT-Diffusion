@@ -28,8 +28,6 @@ from diffusers.training_utils import EMAModel
 from diffusers.utils import is_wandb_available
 from PIL import Image
 import shutil
-if is_wandb_available():
-    import wandb
 
 logger = logging.getLogger(__name__)
 
@@ -141,11 +139,13 @@ class DiffusionFinetuner(Finetuner):
 
         self.accelerator_project_config = ProjectConfiguration(project_dir=self.finetuner_args.output_dir, logging_dir=logging_dir)
         
-        if self.model_args.use_lora:
-            if self.finetuner_args.report_to == "wandb":
-                if not is_wandb_available():
-                    raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
-                import wandb
+        # if self.model_args.use_lora:
+        #     if self.finetuner_args.report_to == "wandb":
+        #         if not is_wandb_available():
+        #             raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
+        #         import wandb
+        #         wandb.init(project=self.finetuner_args.tracker_project_name, config={'allow_val_change':True})
+
                 
         # Initialize the optimizer
 
@@ -166,7 +166,23 @@ class DiffusionFinetuner(Finetuner):
         if self.finetuner_args.allow_tf32:
             torch.backends.cuda.matmul.allow_tf32 = True
 
+        self.global_step = 0
+        self.first_epoch = 0
+        self.training_steps_per_epoch=self.finetuner_args.max_train_steps
+
+
     def finetune(self):
+        #    We need to initialize the trackers we use, and also store our configuration.
+        # The trackers initializes automatically on the main process.
+        if self.accelerator.is_main_process:
+            tracker_config = dict(vars(self.finetuner_args))
+            tracker_config.pop("validation_prompts")
+            tracker_config.pop("num_train_epochs")
+            tracker_config.pop("max_train_steps")
+            
+            self.accelerator.init_trackers(self.finetuner_args.tracker_project_name, config=tracker_config,init_kwargs={"wandb":{"allow_val_change":True}})
+
+
         with ContextManagers(self.deepspeed_zero_init_disabled_context_manager()):
             if self.model_args.use_ema and (self.model_args.use_lora == False):
                 self.model.vae=self.model.vae
@@ -234,6 +250,7 @@ class DiffusionFinetuner(Finetuner):
         train_dataset,self.accelerator = self.dataset.train_dataset(self.accelerator, self.finetuner_args.seed, self.finetuner_args.max_train_samples, self.model.tokenizer)
         train_dataloader = self.dataset.train_dataloader(self.data_args.train_batch_size)
 
+        self.finetuner_args.max_train_steps= self.training_steps_per_epoch*(self.raft_epoch+1)
 
         # Scheduler and math around the number of training steps.
         overrode_max_train_steps = False
@@ -270,13 +287,6 @@ class DiffusionFinetuner(Finetuner):
         # Afterwards we recalculate our number of training epochs
         self.finetuner_args.num_train_epochs = math.ceil(self.finetuner_args.max_train_steps / num_update_steps_per_epoch)
         
-        
-        # We need to initialize the trackers we use, and also store our configuration.
-        # The trackers initializes automatically on the main process.
-        if self.accelerator.is_main_process:
-            tracker_config = dict(vars(self.finetuner_args))
-            tracker_config.pop("validation_prompts")
-            self.accelerator.init_trackers(self.finetuner_args.tracker_project_name, config=tracker_config)
         # Train!
         total_batch_size = self.data_args.train_batch_size * self.accelerator.num_processes * self.finetuner_args.gradient_accumulation_steps
         # print(self.accelerator._schedulers)
@@ -288,28 +298,34 @@ class DiffusionFinetuner(Finetuner):
         logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
         logger.info(f"  Gradient Accumulation steps = {self.finetuner_args.gradient_accumulation_steps}")
         logger.info(f"  Total optimization steps = {self.finetuner_args.max_train_steps}")
-        global_step = 0
-        first_epoch = 0
+
 
         # Potentially load in the weights and states from a previous save
-        resume_from_checkpoint, global_step, first_epoch, resume_step = self.model.resume_from_path(
-                                                            self.finetuner_args.resume_from_checkpoint, 
-                                                            self.finetuner_args.output_dir,
-                                                            self.finetuner_args.gradient_accumulation_steps,
-                                                            num_update_steps_per_epoch,
-                                                            self.raft_epoch,
-                                                            self.accelerator)   
- 
+        if self.raft_epoch==0:
+            resume_from_checkpoint, self.global_step, self.first_epoch, self.resume_step = self.model.resume_from_path(
+                                                                self.finetuner_args.resume_from_checkpoint, 
+                                                                self.finetuner_args.output_dir,
+                                                                self.finetuner_args.gradient_accumulation_steps,
+                                                                num_update_steps_per_epoch,
+                                                                self.raft_epoch,
+                                                                self.accelerator)
+        else: 
+            resume_global_step = self.global_step * self.finetuner_args.gradient_accumulation_steps
+            self.first_epoch = self.global_step // num_update_steps_per_epoch
+            self.resume_step = resume_global_step % (num_update_steps_per_epoch * self.finetuner_args.gradient_accumulation_steps)
+            resume_from_checkpoint= None
+        
         # Only show the progress bar once on each machine.
-        progress_bar = tqdm(range(global_step, self.finetuner_args.max_train_steps), disable=not self.accelerator.is_local_main_process)
+        
+        progress_bar = tqdm(range(self.global_step, self.finetuner_args.max_train_steps), disable=not self.accelerator.is_local_main_process)
         progress_bar.set_description("Steps")
-
-        for epoch in range(first_epoch, self.finetuner_args.num_train_epochs):
+        # print(f"first_epoch:{self.first_epoch} \n num_train_epochs{self.finetuner_args.num_train_epochs} global_step:{self.global_step} max_train_steps:{self.finetuner_args.max_train_steps} ")
+        for epoch in range(self.first_epoch, self.finetuner_args.num_train_epochs):
             self.model.unet.train()
             train_loss = 0.0
             for step, batch in enumerate(train_dataloader):
                 # Skip steps until we reach the resumed step
-                if resume_from_checkpoint and epoch == first_epoch and step < resume_step:
+                if resume_from_checkpoint and epoch == self.first_epoch and step < self.resume_step:
                     if step % self.finetuner_args.gradient_accumulation_steps == 0:
                         progress_bar.update(1)
                     continue
@@ -395,11 +411,11 @@ class DiffusionFinetuner(Finetuner):
                     if self.model_args.use_ema and (self.model_args.use_lora is False):
                         self.model.ema_unet.step(self.model.unet.parameters())
                     progress_bar.update(1)
-                    global_step += 1
-                    self.accelerator.log({"train_loss": train_loss}, step=global_step)
+                    self.global_step += 1
+                    self.accelerator.log({"train_loss": train_loss}, step=self.global_step)
                     train_loss = 0.0
 
-                    if global_step % self.finetuner_args.checkpointing_steps == 0:
+                    if self.global_step % self.finetuner_args.checkpointing_steps == 0:
                         if self.accelerator.is_main_process:
                             # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                             if self.finetuner_args.checkpoints_total_limit is not None:
@@ -418,21 +434,21 @@ class DiffusionFinetuner(Finetuner):
                                     logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
 
                                     for removing_checkpoint in removing_checkpoints:
-                                        removing_checkpoint = os.path.join(self.finetuner_args.output_dir,f"epoch-{self.raft_epoch}", removing_checkpoint)
+                                        removing_checkpoint = os.path.join(self.finetuner_args.output_dir,removing_checkpoint)
                                         shutil.rmtree(removing_checkpoint)
-                            save_path = os.path.join(self.finetuner_args.output_dir,f"epoch-{self.raft_epoch}", f"checkpoint-{global_step}")
+                            save_path = os.path.join(self.finetuner_args.output_dir,f"checkpoint-{self.global_step}")
                             self.accelerator.save_state(save_path)
                             logger.info(f"Saved state to {save_path}")
 
                 logs = {"step_loss": loss.detach().item(), "lr": self.lr_scheduler.get_last_lr()[0]}
                 progress_bar.set_postfix(**logs)
 
-                if global_step >= self.finetuner_args.max_train_steps:
+                if self.global_step >= self.finetuner_args.max_train_steps:
                     break
         
             # Make a validation log
             if self.finetuner_args.validation_prompts is not None:
-                self.model.log_validation(self.finetuner_args,self.accelerator,global_step)
+                self.model.log_validation(self.finetuner_args,self.accelerator,self.global_step, self.data_args.resolution)
 
         if self.raft_epoch==self.raft_args.epochs-1:
             # Create the pipeline using the trained modules and save it.
@@ -452,7 +468,7 @@ class DiffusionFinetuner(Finetuner):
         
             #Final Inference
             if self.model_args.use_lora and self.finetuner_args.validation_prompts:
-                self.model.final_inference(self.finetuner_args, self.accelerator, global_step)  
+                self.model.final_inference(self.finetuner_args, self.accelerator, self.global_step, self.data_args.resolution)  
             
             torch.cuda.empty_cache()
 
@@ -586,4 +602,3 @@ class RaftFinetuner(DiffusionFinetuner):
 
         # Return Finetuned Model
         return finetuned_model_pipeline
-

@@ -166,11 +166,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 path = os.path.basename(resume_from_checkpoint)
             else:
                 # Get the most recent checkpoint
-                epoch_dirs = os.listdir(output_dir)
-                epoch_dirs = [d for d in epoch_dirs if d.startswith("epoch")]
-                epoch_dirs = sorted(epoch_dirs, key=lambda x: int(x.split("-")[1]))
-                epoch_dir_path = epoch_dirs[-1] if len(epoch_dirs) > 0 else None
-                checkpoint_dirs = os.listdir(epoch_dir_path)
+                checkpoint_dirs = os.listdir(output_dir)
                 checkpoint_dirs = [d for d in checkpoint_dirs if d.startswith("checkpoint")]
                 checkpoint_dirs = sorted(checkpoint_dirs, key=lambda x: int(x.split("-")[1]))
                 path = checkpoint_dirs[-1] if len(checkpoint_dirs) > 0 else None
@@ -255,7 +251,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
         else:
             raise ValueError("xformers is not available. Make sure it is installed correctly")
                         
-    def log_validation(self, args, accelerator, epoch):
+    def log_validation(self, args, accelerator, epoch, resolution):
         if accelerator.is_main_process:
             if self.model_args.use_ema and (self.model_args.use_lora == False):
                 # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
@@ -283,10 +279,10 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
 
                 for i in range(len(args.validation_prompts)):
                     if self.model_args.use_lora:
-                        self.validation_images.append(pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0])
+                        self.validation_images.append(pipeline(args.validation_prompts[i], num_inference_steps=50, generator=generator, width=resolution, height=resolution).images[0])
                     else:
                         with torch.autocast(device_type='cuda'):
-                            self.validation_images.append(pipeline(args.validation_prompts[i], num_inference_steps=30, generator=generator).images[0])
+                            self.validation_images.append(pipeline(args.validation_prompts[i], num_inference_steps=50, generator=generator, width=resolution, height=resolution).images[0])
 
                 for tracker in accelerator.trackers:
                     if tracker.name == "tensorboard":
@@ -334,7 +330,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
         pipeline.to(accelerator.device)
         return pipeline
 
-    def final_inference(self, args, accelerator, epoch):
+    def final_inference(self, args, accelerator, epoch, resolution):
         pipeline = DiffusionPipeline.from_pretrained(
             self.model_args.pretrained_model_name_or_path, revision=self.model_args.revision, torch_dtype=self.weight_dtype
         )
@@ -353,7 +349,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
         images = []
 
         for i in range(len(args.validation_prompts)):
-            images.append(pipeline(args.validation_prompts[i], num_inference_steps=20, generator=generator).images[0])
+            images.append(pipeline(args.validation_prompts[i], num_inference_steps=50, generator=generator, width=resolution, height=resolution).images[0])
         
         if accelerator.is_main_process:
             for tracker in accelerator.trackers:
@@ -361,6 +357,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                     np_images = np.stack([np.asarray(img) for img in images])
                     tracker.writer.add_images("test", np_images, epoch, dataformats="NHWC")
                 if tracker.name == "wandb":
+                    accelerator.run.config.update(allow_val_change=True)
                     tracker.log(
                         {
                             "test": [
