@@ -129,13 +129,13 @@ class ImageDataset:
                 self.dataset = self.dataset.shuffle(seed=seed).select(range(max_train_samples))
             # Set the training transforms
             self.training_dataset = self.dataset.with_transform(self.preprocess_train)
-            return self.training_dataset
+            return self.training_dataset, accelerator
 
     def train_dataloader(self, train_batch_size):
         # DataLoaders creation:
         train_dataloader = torch.utils.data.DataLoader(
             self.training_dataset,
-            shuffle=True,
+            shuffle=False,
             collate_fn=self.collate_fn,
             batch_size=train_batch_size,
             num_workers=self.data_args.dataloader_num_workers,

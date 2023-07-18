@@ -12,7 +12,11 @@ import torch
 
 @dataclass
 class FinetunerArguments:
-    
+
+    prediction_type: str= field(
+        default=None, metadata={"help": "The prediction_type that shall be used for training."
+                                "Choose between 'epsilon' or 'v_prediction' or leave `None`. "
+                                "If left to `None` the default prediction type of the scheduler: `noise_scheduler.config.prediciton_type` is chosen.",})
     validation_epochs: int = field(
         default=1, metadata={"help": "Run fine-tuning validation every X epochs."})
     
@@ -86,17 +90,8 @@ class FinetunerArguments:
     logging_dir: str = field(
         default="logs", metadata={"help": "TensorBoard log directory."})
     
-    mixed_precision: Optional[str] = field(
-        default=None, metadata={"help": "Use mixed precision training using Apex., Options: '00', '01', '02', '03'."})
-    
     resume_from_checkpoint: Optional[str] = field(
         default=None, metadata={"help": "Path to a checkpoint from which to resume training."})
-    
-    fp16_backend: str = field(
-        default="auto", metadata={"help": "Mixed precision backend to use (auto, apex, amp, or torch."})
-    
-    fp16_opt_level: str = field(
-        default="O1", metadata={"help": "Mixed precision optimization level (00, 01, 02, 03."})
     
     disable_tqdm: bool = field(
         default=False, metadata={"help": "Disable tqdm progress bars."})
@@ -118,7 +113,6 @@ class FinetunerArguments:
         default= None, metadata= {"help":"Max number of checkpoints to store. Passed as `total_limit` to the `Accelerator` `ProjectConfiguration`."
             " See Accelerator::save_state https://huggingface.co/docs/accelerate/package_reference/accelerator#accelerate.Accelerator.save_state"
             " for more docs"})
-
     
     validation_prompts: Optional[List[str]] = field(
         default= None, metadata= {"help": "A set of prompts evaluated every `validation_epochs` and logged to `report_to`."})
@@ -129,7 +123,7 @@ class FinetunerArguments:
     
     
     noise_offset: float= field(
-        default=1, metadata={"help": "The scale of noise offset"})
+        default=0, metadata={"help": "The scale of noise offset"})
     
     input_perturbation: float= field(
         default=0, metadata={"help": "The scale of input perturbation. Recommended 0.1."})    
@@ -143,26 +137,6 @@ class FinetunerArguments:
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'})
     
     
-    accelerate_local_process_index: int = field(
-        default=0, metadata={"description": "The process index on the current machine."})
-    
-    
-    accelerate_num_processes: int = field(
-        default=1, metadata={"description": "The total number of processes used for training."})
-    
-    accelerate_optimizer_step_was_skipped: bool = field(
-        default=False, metadata={"description": "Whether or not the optimizer update was skipped."})
-    
-    accelerate_process_index: int = field(
-        default=0, metadata={"description": "The overall index of the current process among all processes."})
-    
-    accelerate_sync_gradients: bool = field(
-        default=True, metadata={"description": "Whether the gradients are currently being synced."})
-    
-    accelerate_use_distributed: bool = field(
-        default=False, metadata={"description": "Whether the current configuration is for distributed training."})
-
-    
 @dataclass 
 class ModelArguments:
 
@@ -172,8 +146,8 @@ class ModelArguments:
     use_lora: bool = field(
         default=False, metadata={"help": "Whether to use lora."})
     
-    torch_dtype: Optional[str] = field(default=None,metadata={"help": ("Override the default `torch.dtype` and load the model under this dtype. If `auto` is passed,the "
-        "dtype will be automatically derived from the model's weights."), "choices": ["auto", "bfloat16", "float16", "float32"]})
+    # torch_dtype: Optional[str] = field(default=None,metadata={"help": ("Override the default `torch.dtype` and load the model under this dtype. If `auto` is passed,the "
+    #     "dtype will be automatically derived from the model's weights."), "choices": ["auto", "bfloat16", "float16", "float32"]})
 
     pretrained_model_name_or_path: Optional[str] = field(
         default=None, metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models."})
@@ -188,6 +162,9 @@ class ModelArguments:
     use_ema: bool= field(
         default=False, metadata={"help": "Whether to use EMA model."})
 
+    rank: int=field(
+        default=4, metadata={'help':"The dimension of the LoRA update matrices."}
+    )
 @dataclass
 class InferenceArguments:  
 
@@ -259,7 +236,6 @@ class InferenceArguments:
         default=None, metadata={"help": '''A function that will be called every `callback_steps` steps during inference. The function will be
                 called with the following arguments: `callback(step: int, timestep: int, latents: torch.FloatTensor)`.'''})
 
-
     callback_steps: int = field(
         default=1, metadata={"help": '''The frequency at which the `callback` function will be called. If not specified, the callback will be
                 called at every step.'''})
@@ -270,6 +246,15 @@ class InferenceArguments:
                 `self.processor` in
                 [diffusers.cross_attention](https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/cross_attention.py).'''})
 
+    save_format: str=field(
+        default= "png", metadata={"help":"File format of save images"
+                                  "Reference: https://pillow.readthedocs.io/en/stable/handbook/image-file-formats.html", 
+                                  "choices":["png", "jpeg", "ppm", "gif", "tif", "bmp"]})
+    
+    seed: Optional[int]=field(
+        default=None, metadata={"help":"Used for generating similar images"}
+    )
+
 
 @dataclass
 class DatasetArguments:
@@ -278,8 +263,7 @@ class DatasetArguments:
         default=None, metadata={
             "help": "The name of the Dataset (from the HuggingFace hub to train on."
                     " It can also be a path pointing to a local copy of a dataset in your filesystem,"
-                    " or to a folder containing files that 🤗 Datasets can understand."
-        })
+                    " or to a folder containing files that 🤗 Datasets can understand."})
     
     dataset_config_name: Optional[str] = field(
         default=None, metadata={"help": "The config of the Dataset, leave as None if there's only one config."})
@@ -288,8 +272,7 @@ class DatasetArguments:
         default=None, metadata={
             "help": "A folder containing the training data. Folder contents must follow the structure described in"
                     " https://huggingface.co/docs/datasets/image_dataset#imagefolder. In particular, a `metadata.jsonl` file"
-                    " must exist to provide the captions for the images. Ignored if `dataset_name` is specified."
-        })
+                    " must exist to provide the captions for the images. Ignored if `dataset_name` is specified."})
         
     #Deepanshu Comments: Should this be in finetunerArgs or DatasetArgs
     dataloader_num_workers: int = field(
@@ -331,20 +314,29 @@ class RaftFinetunerArguments:
         default= None, metadata={"help": "Path to pretrained autoprocessor model or model identifier from huggingface.co/models for pickscore."})
     
     inference_batch_size: int = field(
-        default=3, metadata={'help':''}
-    )
+        default=3, metadata={'help':''})
 
     num_images_per_prompt: int= field(
         default=2, metadata={"help":""})
 
     max_workers: int= field(
-        default=3, metadata={"help":"Define max_wokers for mutliprocessing"}
-    )
+        default=1, metadata={"help":"Define max_wokers for mutliprocessing"})
 
     epochs: int= field(
-        default=3, metadata={"help":""}
-    )
+        default=3, metadata={"help":""})
 
-    topk: int= field(
-        default=1, metadata={"help":""}
+    save_finetune_images: bool=field(
+        default=False, metadata={"help":"Save images generated by finetuned model"})
+
+    num_inference_steps: int = field(
+        default=50, metadata={"help": "The number of denoising steps. More denoising steps usually lead to a higher quality image at the expense of slower inference."})
+    
+    guidance_scale: float = field(
+        default=7.5, metadata={"help": '''Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).`guidance_scale` is defined as `w` of equation 2. of [ImagenPaper](https://arxiv.org/pdf/2205.11487.pdf). 
+                Guidance scale is enabled by setting `guidance_scale >
+                1`. Higher guidance scale encourages to generate images that are closely linked to the text `prompt`,
+                usually at the expense of lower image quality.'''})
+
+    grid: bool=field(
+        default=False,metadata={"help":"Save images as a grid"}
     )

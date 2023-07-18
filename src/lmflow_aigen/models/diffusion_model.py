@@ -7,11 +7,9 @@
 import logging
 import os
 from pathlib import Path
-import accelerate
 import torch
 from huggingface_hub import create_repo, upload_folder
 from transformers import CLIPTextModel, CLIPTokenizer, AutoProcessor, AutoModel
-from transformers.utils import ContextManagers
 from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel, StableDiffusionPipeline
 from diffusers.training_utils import EMAModel
 from diffusers.utils import check_min_version, is_wandb_available, deprecate
@@ -57,21 +55,24 @@ class DiffusionModel:
         self.tokenizer = CLIPTokenizer.from_pretrained(
             self.model_args.pretrained_model_name_or_path, subfolder="tokenizer", revision=self.model_args.revision
         )
-
-
         self.text_encoder = CLIPTextModel.from_pretrained(
             self.model_args.pretrained_model_name_or_path, subfolder="text_encoder", revision=self.model_args.revision
         )
         self.vae = AutoencoderKL.from_pretrained(self.model_args.pretrained_model_name_or_path, subfolder="vae", revision=self.model_args.revision)
-
-        self.unet = UNet2DConditionModel.from_pretrained(
-            self.model_args.pretrained_model_name_or_path, subfolder="unet", revision=self.model_args.non_ema_revision
-        )        
+        
+        if self.model_args.use_lora:
+            self.unet = UNet2DConditionModel.from_pretrained(
+                self.model_args.pretrained_model_name_or_path, subfolder="unet", revision=self.model_args.revision
+            )   
+        else:
+            self.unet = UNet2DConditionModel.from_pretrained(
+                self.model_args.pretrained_model_name_or_path, subfolder="unet", revision=self.model_args.non_ema_revision
+            )        
         # freeze parameters of models to save more memory
-        self.vae.requires_grad_(False)
-        self.text_encoder.requires_grad_(False)
         if self.model_args.use_lora:
             self.unet.requires_grad_(False)
+        self.vae.requires_grad_(False)
+        self.text_encoder.requires_grad_(False)
 
         if self.model_args.use_ema and (self.model_args.use_lora is False) :
             self.ema_unet = UNet2DConditionModel.from_pretrained(
@@ -81,11 +82,11 @@ class DiffusionModel:
     
     def to_device(self, device):
         if self.model_args.use_lora:
-            self.unet.to(device, dtype=self.weight_dtype)
-        self.vae.to(device, dtype=self.weight_dtype)
-        self.text_encoder.to(device, dtype=self.weight_dtype)
+            self.unet=self.unet.to(device, dtype=self.weight_dtype)
+        self.vae = self.vae.to(device, dtype=self.weight_dtype)
+        self.text_encoder = self.text_encoder.to(device, dtype=self.weight_dtype)
         if self.model_args.use_ema and (self.model_args.use_lora == False):
-            self.ema_unet.to(device)
+            self.ema_unet = self.ema_unet.to(device)
 
 
     def save(self, output_dir, accelerator):
@@ -158,17 +159,21 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
         )       
 
 
-    def resume_from_path(self, resume_from_checkpoint, output_dir, gradient_accumulation_steps, num_update_steps_per_epoch, accelerator):
+    def resume_from_path(self, resume_from_checkpoint, output_dir, gradient_accumulation_steps, num_update_steps_per_epoch, raft_epoch, accelerator):
         
         if resume_from_checkpoint:
             if resume_from_checkpoint != "latest":
                 path = os.path.basename(resume_from_checkpoint)
             else:
                 # Get the most recent checkpoint
-                dirs = os.listdir(output_dir)
-                dirs = [d for d in dirs if d.startswith("checkpoint")]
-                dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
-                path = dirs[-1] if len(dirs) > 0 else None
+                epoch_dirs = os.listdir(output_dir)
+                epoch_dirs = [d for d in epoch_dirs if d.startswith("epoch")]
+                epoch_dirs = sorted(epoch_dirs, key=lambda x: int(x.split("-")[1]))
+                epoch_dir_path = epoch_dirs[-1] if len(epoch_dirs) > 0 else None
+                checkpoint_dirs = os.listdir(epoch_dir_path)
+                checkpoint_dirs = [d for d in checkpoint_dirs if d.startswith("checkpoint")]
+                checkpoint_dirs = sorted(checkpoint_dirs, key=lambda x: int(x.split("-")[1]))
+                path = checkpoint_dirs[-1] if len(checkpoint_dirs) > 0 else None
                 print(path)
             if path is None:
                 accelerator.print(
@@ -204,9 +209,8 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
         elif mixed_precision == "bf16":
             self.weight_dtype = torch.bfloat16
 
-    def set_lora_attn_proccessor_to_unet(self):
-        self.unet.requires_grad_(False)
 
+    def set_lora_attn_proccessor_to_unet(self):
         # now we will add new LoRA weights to the attention layers
         # It's important to realize here how many attention weights will be added and of which sizes
         # The sizes of the attention layers consist only of two different variables:
@@ -233,7 +237,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 block_id = int(name[len("down_blocks.")])
                 hidden_size = self.unet.config.block_out_channels[block_id]
 
-            lora_attn_procs[name] = LoRAAttnProcessor(hidden_size=hidden_size, cross_attention_dim=cross_attention_dim)
+            lora_attn_procs[name] = LoRAAttnProcessor(hidden_size=hidden_size, cross_attention_dim=cross_attention_dim,rank=self.model_args.rank)
 
         self.unet.set_attn_processor(lora_attn_procs)
 
@@ -310,7 +314,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
     
     def load_model_pipeline(self, accelerator):
         if self.model_args.use_lora:
-            pipeline = DiffusionPipeline.from_pretrained(
+            pipeline = StableDiffusionPipeline.from_pretrained(
                 self.model_args.pretrained_model_name_or_path,
                 unet=accelerator.unwrap_model(self.unet),
                 revision=self.model_args.revision,
@@ -379,7 +383,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
         elif self.score_model_name=='clip':
             self.score_model, self.score_preprocess = clip.load(score_model_pretrained_name_or_path, device=device)
         elif self.score_model_name=="pick":
-            self.score_processor = AutoProcessor.from_pretrained(pickscore_processor_name_or_path).to(device)
+            self.score_preprocess = AutoProcessor.from_pretrained(pickscore_processor_name_or_path)
             self.score_model = AutoModel.from_pretrained(score_model_pretrained_name_or_path).eval().to(device)
         else:
             raise ValueError("Score model should be either 'aesthetic', 'clip', or 'pick'.")
@@ -405,7 +409,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 return score
         elif self.score_model_name=='pick':                
             # preprocess
-            image_inputs = self.score_processor(
+            image_inputs = self.score_preprocess(
                 images=image,
                 padding=True,
                 truncation=True,
@@ -413,7 +417,7 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 return_tensors="pt",
             ).to(self.device)
             
-            text_inputs = self.score_processor(
+            text_inputs = self.score_preprocess(
                 text=text,
                 padding=True,
                 truncation=True,
@@ -463,5 +467,6 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
         scores=[]
         for image in images:
             scores.append(self.get_score(image,text))
+            torch.cuda.empty_cache()
         max_score=max(scores)
         return [max_score,scores.index(max_score)]
