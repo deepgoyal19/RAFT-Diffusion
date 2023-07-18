@@ -511,22 +511,22 @@ class RaftFinetuner(DiffusionFinetuner):
                     width=self.data_args.resolution,
                     height=self.data_args.resolution,
                     num_inference_steps=50).images
-                image_list=[]
+                images_list=[]
             
 
-                # Appending images to the image_list
+                # Appending images to the images_list
                 for i in range(int(len(images)/self.raft_args.num_images_per_prompt)):
-                    image_list.append(images[i*self.raft_args.num_images_per_prompt:(i+1)*self.raft_args.num_images_per_prompt])
+                    images_list.append(images[i*self.raft_args.num_images_per_prompt:(i+1)*self.raft_args.num_images_per_prompt])
                 torch.cuda.empty_cache()
 
                 # Get Aesthetic scores and CLIP scores of images
                 with concurrent.futures.ThreadPoolExecutor(max_workers= self.raft_args.max_workers) as executor:
                     # step_list=[i for i in range(step*self.raft_args.raft_batch_size,(step+1)*self.raft_args.raft_batch_size)]
-                    score_index=executor.map(self.model.preprocess_image,image_list,prompts)
+                    score_index=executor.map(self.model.preprocess_image,images_list,prompts)
 
                 iterator=0
                 for max_scores in score_index:
-                    training_prompts.append([max_scores[0],image_list[iterator][max_scores[1]],prompts[iterator]])
+                    training_prompts.append([max_scores[0],images_list[iterator][max_scores[1]],prompts[iterator]])
                     iterator+=1
 
             # Free memory space
@@ -569,10 +569,10 @@ class RaftFinetuner(DiffusionFinetuner):
             del finetuned_model_pipeline
 
             if self.raft_args.grid:
-                rows=len(images)/self.raft_args.num_images_per_prompt
+                rows=len(images_list)/self.raft_args.num_images_per_prompt
                 cols=self.raft_args.num_images_per_prompt
-                assert len(images) == rows*cols
-                w, h = images[0].size
+                assert len(images_list) == rows*cols
+                w, h = images_list[0].size
                 grid = Image.new('RGB', size=(cols*w, rows*h))
                 
                 for i, img in enumerate(images):
