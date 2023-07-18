@@ -252,8 +252,7 @@ class InferenceArguments:
                                   "choices":["png", "jpeg", "ppm", "gif", "tif", "bmp"]})
     
     seed: Optional[int]=field(
-        default=None, metadata={"help":"Used for generating similar images"}
-    )
+        default=None, metadata={"help":"Used for generating similar images"})
 
 
 @dataclass
@@ -338,5 +337,9 @@ class RaftFinetunerArguments:
                 usually at the expense of lower image quality.'''})
 
     grid: bool=field(
-        default=False,metadata={"help":"Save images as a grid"}
-    )
+        default=False,metadata={"help":"Save images as a grid"})
+
+    save_format: str=field(
+        default= "png", metadata={"help":"File format of save images"
+                                  "Reference: https://pillow.readthedocs.io/en/stable/handbook/image-file-formats.html", 
+                                  "choices":["png", "jpeg", "ppm", "gif", "tif", "bmp"]})

@@ -510,7 +510,7 @@ class RaftFinetuner(DiffusionFinetuner):
                     num_images_per_prompt=self.raft_args.num_images_per_prompt,
                     width=self.data_args.resolution,
                     height=self.data_args.resolution,
-                    num_inference_steps=50).images
+                    num_inference_steps=self.raft_args.num_inference_steps).images
                 images_list=[]
             
 
@@ -565,17 +565,16 @@ class RaftFinetuner(DiffusionFinetuner):
                         width=self.data_args.resolution,
                         height=self.data_args.resolution,
                         num_inference_steps=self.raft_args.num_inference_steps).images
-                images_list.append(images)
-            del finetuned_model_pipeline
+                images_list.extend(images)
 
             if self.raft_args.grid:
-                rows=len(images_list)/self.raft_args.num_images_per_prompt
+                rows=int(len(images_list)/self.raft_args.num_images_per_prompt)
                 cols=self.raft_args.num_images_per_prompt
                 assert len(images_list) == rows*cols
                 w, h = images_list[0].size
                 grid = Image.new('RGB', size=(cols*w, rows*h))
                 
-                for i, img in enumerate(images):
+                for i, img in enumerate(images_list):
                     grid.paste(img, box=(i%cols*w, i//cols*h))
                 
                 if self.finetuner_args.output_dir:
