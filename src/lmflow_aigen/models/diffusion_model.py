@@ -117,22 +117,22 @@ class DiffusionModel:
             img_str += f"![img_{i}](./image_{i}.png)\n"
 
         yaml = f"""
----
-license: creativeml-openrail-m
-base_model: {base_model}
-tags:
-- stable-diffusion
-- stable-diffusion-diffusers
-- text-to-image
-- diffusers
-- lora
-inference: true
----
-    """
+            ---
+            license: creativeml-openrail-m
+            base_model: {base_model}
+            tags:
+            - stable-diffusion
+            - stable-diffusion-diffusers
+            - text-to-image
+            - diffusers
+            - lora
+            inference: true
+            ---
+                """
         model_card = f"""
-# LoRA text2image fine-tuning - {repo_id}
-These are LoRA adaption weights for {base_model}. The weights were fine-tuned on the {dataset_name} dataset. You can find some example images in the following. \n
-{img_str}
+            # LoRA text2image fine-tuning - {repo_id}
+            These are LoRA adaption weights for {base_model}. The weights were fine-tuned on the {dataset_name} dataset. You can find some example images in the following. \n
+            {img_str}
         """
         with open(os.path.join(repo_folder, "README.md"), "w") as f:
             f.write(yaml + model_card)
