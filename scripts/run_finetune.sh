@@ -1,27 +1,31 @@
 accelerate launch examples/finetune.py \
-        --output_dir='/home/deepanshu/LMFlow-diffusion-main/examples/model',
-        --enable_xformers_memory_efficient_attention=True,
-        --gradient_accumulation_steps=1,
-        --lr_scheduler='constant',
-        --learning_rate=9e-6,
-        --lr_warmup_steps=0,
-        --max_train_steps=50,
-        --gradient_checkpointing=True,
-        --max_grad_norm=1,
-        --tracker_project_name="text2image-fine-tune",
-        --checkpointing_steps=40,
-        --pretrained_model_name_or_path="runwayml/stable-diffusion-v1-5",
-        --use_ema= False,
-        --use_lora= True,
-        --resolution=256,
-        --dataset_name='/home/deepanshu/LMFlow-diffusion-main/a',
-        --train_batch_size=8,
-        --topk=8,
-        --inference_batch_size=10,
-        --epochs=2,
-        --num_images_per_prompt=10,
-        --clip_model_pretrained_or_path='ViT-L/14',
-        --score_model='clip',
-        --save_finetune_images=True,
-        --grid=True,
+        --output_dir '/home/deepanshu/LMFlow-diffusion-main/examples/model' \
+        --enable_xformers_memory_efficient_attention True \
+        --gradient_accumulation_steps 1 \
+        --lr_scheduler 'constant' \
+        --learning_rate 9e-6 \
+        --lr_warmup_steps 0 \
+        --max_train_steps 50 \
+        --gradient_checkpointing True \
+        --max_grad_norm 1 \
+        --tracker_project_name "text2image-fine-tune" \
+        --pretrained_model_name_or_path "runwayml/stable-diffusion-v1-5" \
+        --use_ema False \
+        --use_lora True \
+        --resolution 256 \
+        --dataset_name '/home/deepanshu/LMFlow-diffusion-main/a' \
+        --train_batch_size 5 \
+        --topk 5 \
+        --inference_batch_size 10 \
+        --epochs 7 \
+        --num_images_per_prompt 10 \
+        --clip_model_pretrained_or_path 'ViT-L/14' \
+        --score_model 'clip' \
+        --save_finetune_images True \
+        --grid True \
+        --num_inference_steps 50 \
+        --checkpointing_step 350 \
+        --negative_prompt 'painting, sketch, drawing, noise, bad' \
+        --noise_offset -0.1 \
+        --pipeline_scheduler 'DDPMScheduler'
 

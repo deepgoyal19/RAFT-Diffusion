@@ -252,7 +252,8 @@ class InferenceArguments:
                                   "choices":["png", "jpeg", "ppm", "gif", "tif", "bmp"]})
     
     seed: Optional[int]=field(
-        default=None, metadata={"help":"Used for generating similar images"})
+        default=None, metadata={"help":"Used for generating similar images"}
+    )
 
 
 @dataclass
@@ -297,11 +298,11 @@ class DatasetArguments:
 class RaftFinetunerArguments:
 
     clip_model_pretrained_or_path: str = field(
-        default= 'ViT-L-14', metadata={"help":  "Path to pretrained clip model or clip model identifier from huggingface.co/model",
-                                        "choices":{'aesthetic':['ViT-B-32','ViT-B-16','ViT-L-14']}} )
+        default= 'ViT-L-14', metadata={"help":  "Path to pretrained clip model or clip model identifier from huggingface.co/model"})
+                                        # "choices":{'aesthetic':['ViT-B-32','ViT-B-16','ViT-L-14']}} )
 
     topk: int = field(
-        default=1, metadata={"help": ""})
+        default=1, metadata={"help": "Select number of samples to select for finetuning"})
     
     raft_batch_size: int = field(
     default=16, metadata={"help": "Batch size (per device for the training dataloader."})
@@ -343,3 +344,12 @@ class RaftFinetunerArguments:
         default= "png", metadata={"help":"File format of save images"
                                   "Reference: https://pillow.readthedocs.io/en/stable/handbook/image-file-formats.html", 
                                   "choices":["png", "jpeg", "ppm", "gif", "tif", "bmp"]})
+    
+    negative_prompt: Optional[str] = field(
+        default=None, metadata={"help": '''The prompt or prompts not to guide the image generation. If not defined, one has to pass
+                `negative_prompt_embeds` instead. Ignored when not using guidance (i.e., ignored if `guidance_scale` is
+                less than `1`).'''})
+
+    pipeline_scheduler: Optional[str]= field(
+        default= None, metadata={"help":"", "choices": ['DDPMScheduler', 'PNDMScheduler', 'LMSDiscreteScheduler', 'EulerDiscreteScheduler', 'EulerAncestralDiscreteScheduler', 'DPMSolverMultistepScheduler']}
+    )

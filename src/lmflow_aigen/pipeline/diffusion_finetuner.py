@@ -100,14 +100,6 @@ class DiffusionFinetuner(Finetuner):
     """
     Initializes the `Finetuner` class with given arguments.
 
-    Parameters
-    ------------
-    model_args : ModelArguments object.
-        Contains the arguments required to load the model.
-
-    data_args : DatasetArguments object.
-        Contains the arguments required to load the dataset.
-
     finetuner_args : FinetunerArguments object.
         Contains the arguments required to perform finetuning.
 
@@ -122,7 +114,6 @@ class DiffusionFinetuner(Finetuner):
     def __init__(self,finetuner_args):
         
         self.finetuner_args = finetuner_args
-  
 
         # Make one log on every process with the configuration for debugging.
         logging.basicConfig(
@@ -138,6 +129,11 @@ class DiffusionFinetuner(Finetuner):
         logging_dir = os.path.join(self.finetuner_args.output_dir, self.finetuner_args.logging_dir)
 
         self.accelerator_project_config = ProjectConfiguration(project_dir=self.finetuner_args.output_dir, logging_dir=logging_dir)
+
+        self.accelerator = Accelerator(
+            gradient_accumulation_steps=self.finetuner_args.gradient_accumulation_steps,
+            log_with=self.finetuner_args.report_to,
+            project_config=self.accelerator_project_config)
         
         # if self.model_args.use_lora:
         #     if self.finetuner_args.report_to == "wandb":
@@ -170,23 +166,38 @@ class DiffusionFinetuner(Finetuner):
         self.first_epoch = 0
         self.training_steps_per_epoch=self.finetuner_args.max_train_steps
 
-
-    def finetune(self):
-        #    We need to initialize the trackers we use, and also store our configuration.
+        if self.finetuner_args.resume_from_checkpoint:
+            if self.finetuner_args.resume_from_checkpoint != "latest":
+                path = os.path.basename(self.finetuner_args.resume_from_checkpoint)
+            else:
+                # Get the most recent checkpoint
+                dirs = os.listdir(self.finetuner_args.output_dir)
+                dirs = [d for d in dirs if d.startswith("checkpoint")]
+                dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
+                path = dirs[-1] if len(dirs) > 0 else None
+                self.global_step = int(path.split("-")[1])
+                resume_global_step = self.global_step * self.finetuner_args.gradient_accumulation_steps
+                self.resume_from_raft_epoch = int(int(path.split("-")[1]) / self.finetuner_args.max_train_steps)
+                self.raft_epoch = self.resume_from_raft_epoch 
+                self.raft_args.epochs+= self.raft_epoch
+                self.finetuner_args.max_train_steps+= resume_global_step
+            if path is None:
+                self.accelerator.print(
+                    f"Checkpoint '{self.finetuner_args.resume_from_checkpoint}' does not exist. Starting a new training run."
+                )
+                self.raft_epoch = 0
+                self.resume_from_raft_epoch = 0
+        else:
+            self.raft_epoch = 0
+            self.resume_from_raft_epoch = 0
+        # We need to initialize the trackers we use, and also store our configuration.
         # The trackers initializes automatically on the main process.
         if self.accelerator.is_main_process:
             tracker_config = dict(vars(self.finetuner_args))
-            tracker_config.pop("validation_prompts")
             tracker_config.pop("num_train_epochs")
             tracker_config.pop("max_train_steps")
             
             self.accelerator.init_trackers(self.finetuner_args.tracker_project_name, config=tracker_config,init_kwargs={"wandb":{"allow_val_change":True}})
-
-
-        with ContextManagers(self.deepspeed_zero_init_disabled_context_manager()):
-            if self.model_args.use_ema and (self.model_args.use_lora == False):
-                self.model.vae=self.model.vae
-                self.model.text_encoder=self.model.text_encoder
 
         # logger.info(self.accelerator.state, main_process_only=False)
         if self.accelerator.is_local_main_process:
@@ -198,12 +209,17 @@ class DiffusionFinetuner(Finetuner):
             transformers.utils.logging.set_verbosity_error()
             diffusers.utils.logging.set_verbosity_error()
 
-        
         # Handle the repository creation
         if self.accelerator.is_main_process:
             if self.finetuner_args.output_dir is not None:
                 os.makedirs(self.finetuner_args.output_dir, exist_ok=True)
-        if self.raft_epoch==0 :
+ 
+    def finetune(self):
+        if self.raft_epoch==self.resume_from_raft_epoch:
+            with ContextManagers(self.deepspeed_zero_init_disabled_context_manager()):
+                if self.model_args.use_ema and (self.model_args.use_lora == False):
+                    self.model.vae=self.model.vae
+                    self.model.text_encoder=self.model.text_encoder
             if self.model_args.use_lora:
                 self.model.set_lora_attn_proccessor_to_unet()
             else: 
@@ -211,10 +227,10 @@ class DiffusionFinetuner(Finetuner):
                     # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
                     self.accelerator.register_save_state_pre_hook(self.save_model_hook)
                     self.accelerator.register_load_state_pre_hook(self.load_model_hook)
+             
+            if self.finetuner_args.enable_xformers_memory_efficient_attention:
+                self.model.use_xformers()
 
-
-        if self.finetuner_args.enable_xformers_memory_efficient_attention:
-            self.model.use_xformers()
 
         if self.model_args.use_lora :
             self.lora_layers = AttnProcsLayers(self.model.unet.attn_processors)
@@ -252,12 +268,12 @@ class DiffusionFinetuner(Finetuner):
 
         self.finetuner_args.max_train_steps= self.training_steps_per_epoch*(self.raft_epoch+1)
 
-        # Scheduler and math around the number of training steps.
-        overrode_max_train_steps = False
+        # # Scheduler and math around the number of training steps.
+        self.overrode_max_train_steps = False
         num_update_steps_per_epoch = math.ceil(len(train_dataloader) / self.finetuner_args.gradient_accumulation_steps)
         if self.finetuner_args.max_train_steps is None:
             self.finetuner_args.max_train_steps = self.finetuner_args.num_train_epochs * num_update_steps_per_epoch
-            overrode_max_train_steps = True
+            self.overrode_max_train_steps = True
 
         self.lr_scheduler = get_scheduler(
             self.finetuner_args.lr_scheduler,
@@ -282,7 +298,7 @@ class DiffusionFinetuner(Finetuner):
  
         # We need to recalculate our total training steps as the size of the training dataloader may have changed.
         num_update_steps_per_epoch = math.ceil(len(train_dataloader) / self.finetuner_args.gradient_accumulation_steps)
-        if overrode_max_train_steps:
+        if self.overrode_max_train_steps:
             self.finetuner_args.max_train_steps = self.finetuner_args.num_train_epochs * num_update_steps_per_epoch
         # Afterwards we recalculate our number of training epochs
         self.finetuner_args.num_train_epochs = math.ceil(self.finetuner_args.max_train_steps / num_update_steps_per_epoch)
@@ -300,20 +316,19 @@ class DiffusionFinetuner(Finetuner):
         logger.info(f"  Total optimization steps = {self.finetuner_args.max_train_steps}")
 
 
-        # Potentially load in the weights and states from a previous save
-        if self.raft_epoch==0:
-            resume_from_checkpoint, self.global_step, self.first_epoch, self.resume_step = self.model.resume_from_path(
+        # # Potentially load in the weights and states from a previous save
+        if self.raft_epoch==self.resume_from_raft_epoch:
+            self.resume_from_checkpoint, self.global_step, self.first_epoch, self.resume_step = self.model.resume_from_path(
                                                                 self.finetuner_args.resume_from_checkpoint, 
                                                                 self.finetuner_args.output_dir,
                                                                 self.finetuner_args.gradient_accumulation_steps,
                                                                 num_update_steps_per_epoch,
-                                                                self.raft_epoch,
                                                                 self.accelerator)
         else: 
             resume_global_step = self.global_step * self.finetuner_args.gradient_accumulation_steps
             self.first_epoch = self.global_step // num_update_steps_per_epoch
             self.resume_step = resume_global_step % (num_update_steps_per_epoch * self.finetuner_args.gradient_accumulation_steps)
-            resume_from_checkpoint= None
+            self.resume_from_checkpoint= None
         
         # Only show the progress bar once on each machine.
         
@@ -325,7 +340,7 @@ class DiffusionFinetuner(Finetuner):
             train_loss = 0.0
             for step, batch in enumerate(train_dataloader):
                 # Skip steps until we reach the resumed step
-                if resume_from_checkpoint and epoch == self.first_epoch and step < self.resume_step:
+                if self.resume_from_checkpoint and epoch == self.first_epoch and step < self.resume_step:
                     if step % self.finetuner_args.gradient_accumulation_steps == 0:
                         progress_bar.update(1)
                     continue
@@ -445,10 +460,11 @@ class DiffusionFinetuner(Finetuner):
 
                 if self.global_step >= self.finetuner_args.max_train_steps:
                     break
-        
+                
+                self.finetuner_args.learning_raate = self.lr_scheduler.get_last_lr()[0]
             # Make a validation log
             if self.finetuner_args.validation_prompts is not None:
-                self.model.log_validation(self.finetuner_args,self.accelerator,self.global_step, self.data_args.resolution)
+                self.model.log(self.finetuner_args,self.accelerator,self.global_step, self.data_args.resolution, 'validation')
 
         if self.raft_epoch==self.raft_args.epochs-1:
             # Create the pipeline using the trained modules and save it.
@@ -467,8 +483,8 @@ class DiffusionFinetuner(Finetuner):
                         )
         
             #Final Inference
-            if self.model_args.use_lora and self.finetuner_args.validation_prompts:
-                self.model.final_inference(self.finetuner_args, self.accelerator, self.global_step, self.data_args.resolution)  
+            if self.finetuner_args.validation_prompts is not None:
+                self.model.log(self.finetuner_args,self.accelerator,self.global_step, self.data_args.resolution, 'test')
             
             torch.cuda.empty_cache()
 
@@ -476,21 +492,22 @@ class DiffusionFinetuner(Finetuner):
 
 
 class RaftFinetuner(DiffusionFinetuner):
+    # Parameters
+    # ------------
+    # model_args : ModelArguments object.
+    #     Contains the arguments required to load the model.
+
+    # data_args : DatasetArguments object.
+    #     Contains the arguments required to load the dataset.
 
     def __init__(self, model_args, data_args, finetuner_args, raft_args):
         self.raft_args = raft_args
         self.data_args = data_args
         self.model_args = model_args 
-        super().__init__(finetuner_args)
+        super().__init__(finetuner_args)        
 
-        self.accelerator = Accelerator(
-            gradient_accumulation_steps=self.finetuner_args.gradient_accumulation_steps,
-            log_with=self.finetuner_args.report_to,
-            project_config=self.accelerator_project_config)
-        
         
     def raft_finetune(self, model, dataset):
-        # Load Diffusion Model pipeline
         self.model=model
         self.dataset=dataset
 
@@ -498,46 +515,84 @@ class RaftFinetuner(DiffusionFinetuner):
         # as these models are only used for inference, keeping weights in full precision is not required.
         self.model.set_weight_dtype(self.accelerator.mixed_precision)
 
+        # Set device 
         self.model.to_device(self.accelerator.device)
 
-        #Load Score Model
+        # Load Score Model
         self.model.load_score_model(self.raft_args.clip_model_pretrained_or_path,self.raft_args.score_model, self.accelerator.device)
 
+        # Get dataloader to perform RAFT
         inference_dataloader=self.dataset.inference_dataloader(self.raft_args.inference_batch_size)
+        
+        generator = torch.Generator(device=self.accelerator.device)
+        if self.finetuner_args.seed is not None:
+            generator = generator.manual_seed(self.finetuner_args.seed)
 
-        for raft_epoch in range(self.raft_args.epochs):
-            self.raft_epoch=raft_epoch
+        # if self.raft_args.pipeline_scheduler:
+        #     exec(f'from diffusers import {self.raft_args.pipeline_scheduler}')
 
+        # Run RAFT 
+        for self.raft_epoch in range(self.resume_from_raft_epoch,self.raft_args.epochs):
+            
+
+            # Get score model to device
             self.model.score_model.to(self.accelerator.device)
             # self.model.score_amodel.to(self.accelerator.device)
 
+            # Load Diffusion Pipeline
             pipeline = self.model.load_model_pipeline(self.accelerator)
-            # pipeline.unet.load_attn_procs=self.model.unet.attn_processors
-            pipeline.enable_xformers_memory_efficient_attention()
-            scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
-            pipeline.scheduler = scheduler
+
+            # Use xformers to save memory
+            if self.finetuner_args.enable_xformers_memory_efficient_attention:
+                pipeline.enable_xformers_memory_efficient_attention()
+
+            
+            # if self.raft_args.pipeline_scheduler:
+            #     pipeline.scheduler = self.model.load_scheduler(self.raft_args.pipeline_scheduler, pipeline)
+            
+            # Use Raft Algorithm 
             training_prompts=[]
             for step, prompts in enumerate(inference_dataloader):
-                prompts=prompts['text']
+
+                # Get negative prompts for raft pipeline
+                if self.raft_args.negative_prompt:
+                    negative_prompts = [self.raft_args.negative_prompt for _ in range(len(prompts['text']))]
+                else:   
+                    negative_prompts = None
+
                 # Generating Images
-                # with torch.autocast(device_type='cuda'):
-                images=pipeline( 
-                    prompts,
-                    num_images_per_prompt=self.raft_args.num_images_per_prompt,
-                    width=self.data_args.resolution,
-                    height=self.data_args.resolution,
-                    num_inference_steps=self.raft_args.num_inference_steps).images
+                prompts=prompts['text']
+                if self.model_args.use_lora :
+                    images=pipeline( 
+                            prompts,
+                            num_images_per_prompt=self.raft_args.num_images_per_prompt,
+                            width=self.data_args.resolution,
+                            height=self.data_args.resolution,
+                            num_inference_steps=self.raft_args.num_inference_steps,
+                            negative_prompt= negative_prompts,
+                            generator=generator).images
+                else:
+                    with torch.autocast(device_type='cuda'):
+                        images=pipeline( 
+                            prompts,
+                            num_images_per_prompt=self.raft_args.num_images_per_prompt,
+                            width=self.data_args.resolution,
+                            height=self.data_args.resolution,
+                            num_inference_steps=self.raft_args.num_inference_steps,
+                            negative_prompt= negative_prompts,
+                            generator=generator).images
                 images_list=[]
             
+                # Delete Stable pipeline to save memory
+                del pipeline 
 
                 # Appending images to the images_list
                 for i in range(int(len(images)/self.raft_args.num_images_per_prompt)):
                     images_list.append(images[i*self.raft_args.num_images_per_prompt:(i+1)*self.raft_args.num_images_per_prompt])
                 torch.cuda.empty_cache()
 
-                # Get Aesthetic scores and CLIP scores of images
+                # Get Aesthetic scores, Pick scores and CLIP scores of images
                 with concurrent.futures.ThreadPoolExecutor(max_workers= self.raft_args.max_workers) as executor:
-                    # step_list=[i for i in range(step*self.raft_args.raft_batch_size,(step+1)*self.raft_args.raft_batch_size)]
                     score_index=executor.map(self.model.preprocess_image,images_list,prompts)
 
                 iterator=0
@@ -545,10 +600,12 @@ class RaftFinetuner(DiffusionFinetuner):
                     training_prompts.append([max_scores[0],images_list[iterator][max_scores[1]],prompts[iterator]])
                     iterator+=1
 
-            # Free memory space
+            # Load model to cpu to save GPU memory space
             self.model.score_model.to('cpu')
             # self.model.score_amodel.to('cpu')
-            del pipeline 
+            
+
+            # Get images wit top scores
             training_prompts=[row[1:3] for row in sorted(training_prompts,key=lambda x: (x[0]),reverse=True)[:self.raft_args.topk]]
 
             # Store texts and images
@@ -566,23 +623,40 @@ class RaftFinetuner(DiffusionFinetuner):
             self.finetune()  
             torch.cuda.empty_cache()
         
+        # Save images  generated by finetuned model
         if self.raft_args.save_finetune_images:
             images_list=[]
             self.model.to_device(self.accelerator.device)
             finetuned_model_pipeline = self.model.load_model_pipeline(self.accelerator)
             finetuned_model_pipeline.enable_xformers_memory_efficient_attention()
+            if self.raft_args.pipeline_scheduler:
+                finetuned_model_pipeline.scheduler = self.model.load_scheduler(self.raft_args.pipeline_scheduler, finetuned_model_pipeline)
             self.accelerator.free_memory()
             for step, prompts in enumerate(inference_dataloader):
                 prompts=prompts['text']
                 generator = torch.Generator(device=self.accelerator.device)
-                images=finetuned_model_pipeline( 
-                        prompts,
-                        num_images_per_prompt=self.raft_args.num_images_per_prompt,
-                        width=self.data_args.resolution,
-                        height=self.data_args.resolution,
-                        num_inference_steps=self.raft_args.num_inference_steps).images
+                if self.model_args.use_lora :
+                    images=finetuned_model_pipeline( 
+                            prompts,
+                            num_images_per_prompt=self.raft_args.num_images_per_prompt,
+                            width=self.data_args.resolution,
+                            height=self.data_args.resolution,
+                            num_inference_steps=self.raft_args.num_inference_steps,
+                            negative_prompt= negative_prompts,
+                            generator=generator).images
+                else:
+                    with torch.autocast(device_type='cuda'):
+                        images=finetuned_model_pipeline( 
+                            prompts,
+                            num_images_per_prompt=self.raft_args.num_images_per_prompt,
+                            width=self.data_args.resolution,
+                            height=self.data_args.resolution,
+                            num_inference_steps=self.raft_args.num_inference_steps,
+                            negative_prompt= negative_prompts,
+                            generator=generator).images
                 images_list.extend(images)
 
+            # Save images as a grid
             if self.raft_args.grid:
                 rows=int(len(images_list)/self.raft_args.num_images_per_prompt)
                 cols=self.raft_args.num_images_per_prompt

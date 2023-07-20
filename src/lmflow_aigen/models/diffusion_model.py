@@ -117,22 +117,22 @@ class DiffusionModel:
             img_str += f"![img_{i}](./image_{i}.png)\n"
 
         yaml = f"""
-            ---
-            license: creativeml-openrail-m
-            base_model: {base_model}
-            tags:
-            - stable-diffusion
-            - stable-diffusion-diffusers
-            - text-to-image
-            - diffusers
-            - lora
-            inference: true
-            ---
-                """
+---
+license: creativeml-openrail-m
+base_model: {base_model}
+tags:
+- stable-diffusion
+- stable-diffusion-diffusers
+- text-to-image
+- diffusers
+- lora
+inference: true
+---
+    """
         model_card = f"""
-            # LoRA text2image fine-tuning - {repo_id}
-            These are LoRA adaption weights for {base_model}. The weights were fine-tuned on the {dataset_name} dataset. You can find some example images in the following. \n
-            {img_str}
+# LoRA text2image fine-tuning - {repo_id}
+These are LoRA adaption weights for {base_model}. The weights were fine-tuned on the {dataset_name} dataset. You can find some example images in the following. \n
+{img_str}
         """
         with open(os.path.join(repo_folder, "README.md"), "w") as f:
             f.write(yaml + model_card)
@@ -159,18 +159,17 @@ class DiffusionModel:
         )       
 
 
-    def resume_from_path(self, resume_from_checkpoint, output_dir, gradient_accumulation_steps, num_update_steps_per_epoch, raft_epoch, accelerator):
+    def resume_from_path(self, resume_from_checkpoint, output_dir, gradient_accumulation_steps, num_update_steps_per_epoch,  accelerator):
         
         if resume_from_checkpoint:
             if resume_from_checkpoint != "latest":
                 path = os.path.basename(resume_from_checkpoint)
             else:
                 # Get the most recent checkpoint
-                checkpoint_dirs = os.listdir(output_dir)
-                checkpoint_dirs = [d for d in checkpoint_dirs if d.startswith("checkpoint")]
-                checkpoint_dirs = sorted(checkpoint_dirs, key=lambda x: int(x.split("-")[1]))
-                path = checkpoint_dirs[-1] if len(checkpoint_dirs) > 0 else None
-                print(path)
+                dirs = os.listdir(output_dir)
+                dirs = [d for d in dirs if d.startswith("checkpoint")]
+                dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
+                path = dirs[-1] if len(dirs) > 0 else None
             if path is None:
                 accelerator.print(
                     f"Checkpoint '{resume_from_checkpoint}' does not exist. Starting a new training run."
@@ -190,7 +189,9 @@ class DiffusionModel:
                 resume_global_step = global_step * gradient_accumulation_steps
                 first_epoch = global_step // num_update_steps_per_epoch
                 resume_step = resume_global_step % (num_update_steps_per_epoch * gradient_accumulation_steps)
-
+                # raft_epoch = int(path.split("-")[1]) / max_training_step
+                # raft_epochs+= raft_epoch
+                # max_training_step+= resume_global_step
                 return resume_from_checkpoint, global_step, first_epoch, resume_step
         else:
             resume_step = None
@@ -251,7 +252,7 @@ class DiffusionModel:
         else:
             raise ValueError("xformers is not available. Make sure it is installed correctly")
                         
-    def log_validation(self, args, accelerator, epoch, resolution):
+    def log_validation(self, args, accelerator, epoch, resolution, log_type):
         if accelerator.is_main_process:
             if self.model_args.use_ema and (self.model_args.use_lora == False):
                 # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
@@ -265,8 +266,7 @@ class DiffusionModel:
                 
                 pipeline = self.load_model_pipeline(accelerator)
                 
-                pipeline = pipeline.to(accelerator.device)
-                pipeline.set_progress_bar_config(disable=False)
+                pipeline.set_progress_bar_config(disable=True)
 
                 if args.enable_xformers_memory_efficient_attention:
                     pipeline.enable_xformers_memory_efficient_attention()
@@ -287,16 +287,29 @@ class DiffusionModel:
                 for tracker in accelerator.trackers:
                     if tracker.name == "tensorboard":
                         np_images = np.stack([np.asarray(img) for img in self.validation_images])
-                        tracker.writer.add_images("validation", np_images, epoch, dataformats="NHWC")
+                        if log_type=='validation':
+                            tracker.writer.add_images("validation", np_images, epoch, dataformats="NHWC")
+                        else:
+                            tracker.writer.add_images("test", np_images, epoch, dataformats="NHWC")
                     elif tracker.name == "wandb":
-                        tracker.log(
-                            {
-                                "validation": [
-                                    wandb.Image(image, caption=f"{i}: {args.validation_prompts[i]}")
-                                    for i, image in enumerate(self.validation_images)
-                                ]
-                            }
-                        )
+                        if log_type=='validation':
+                            tracker.log(
+                                {
+                                    "validation": [
+                                        wandb.Image(image, caption=f"{i}: {args.validation_prompts[i]}")
+                                        for i, image in enumerate(self.validation_images)
+                                    ]
+                                }
+                            )
+                        else:
+                            tracker.log(
+                                {
+                                    "test": [
+                                        wandb.Image(image, caption=f"{i}: {args.validation_prompts[i]}")
+                                        for i, image in enumerate(self.validation_images)
+                                    ]
+                                }
+                            )
                     else:
                         logger.warn(f"image logging not implemented for {tracker.name}")
                 del pipeline
@@ -357,7 +370,6 @@ class DiffusionModel:
                     np_images = np.stack([np.asarray(img) for img in images])
                     tracker.writer.add_images("test", np_images, epoch, dataformats="NHWC")
                 if tracker.name == "wandb":
-                    accelerator.run.config.update(allow_val_change=True)
                     tracker.log(
                         {
                             "test": [
@@ -467,3 +479,8 @@ class DiffusionModel:
             torch.cuda.empty_cache()
         max_score=max(scores)
         return [max_score,scores.index(max_score)]
+
+    def load_scheduler(self, scheduler, pipeline):
+        print(scheduler)
+        exec(f'scheduler = {scheduler}.from_config({pipeline.scheduler.config})')
+        return scheduler      
