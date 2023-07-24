@@ -111,9 +111,13 @@ class DiffusionFinetuner(Finetuner):
 
     """   
 
-    def __init__(self,finetuner_args):
+    def __init__(self, finetuner_args, **kwargs):
         
         self.finetuner_args = finetuner_args
+
+        if 'model_args' and 'data_args' in kwargs:
+            self.model_args = kwargs['model_args']
+            self.data_args = kwargs['data_args']
 
         # Make one log on every process with the configuration for debugging.
         logging.basicConfig(
@@ -166,30 +170,6 @@ class DiffusionFinetuner(Finetuner):
         self.first_epoch = 0
         self.training_steps_per_epoch=self.finetuner_args.max_train_steps
 
-        if self.finetuner_args.resume_from_checkpoint:
-            if self.finetuner_args.resume_from_checkpoint != "latest":
-                path = os.path.basename(self.finetuner_args.resume_from_checkpoint)
-            else:
-                # Get the most recent checkpoint
-                dirs = os.listdir(self.finetuner_args.output_dir)
-                dirs = [d for d in dirs if d.startswith("checkpoint")]
-                dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
-                path = dirs[-1] if len(dirs) > 0 else None
-                self.global_step = int(path.split("-")[1])
-                resume_global_step = self.global_step * self.finetuner_args.gradient_accumulation_steps
-                self.resume_from_raft_epoch = int(int(path.split("-")[1]) / self.finetuner_args.max_train_steps)
-                self.raft_epoch = self.resume_from_raft_epoch 
-                self.raft_args.epochs+= self.raft_epoch
-                self.finetuner_args.max_train_steps+= resume_global_step
-            if path is None:
-                self.accelerator.print(
-                    f"Checkpoint '{self.finetuner_args.resume_from_checkpoint}' does not exist. Starting a new training run."
-                )
-                self.raft_epoch = 0
-                self.resume_from_raft_epoch = 0
-        else:
-            self.raft_epoch = 0
-            self.resume_from_raft_epoch = 0
         # We need to initialize the trackers we use, and also store our configuration.
         # The trackers initializes automatically on the main process.
         if self.accelerator.is_main_process:
@@ -214,22 +194,26 @@ class DiffusionFinetuner(Finetuner):
             if self.finetuner_args.output_dir is not None:
                 os.makedirs(self.finetuner_args.output_dir, exist_ok=True)
  
-    def finetune(self):
-        if self.raft_epoch==self.resume_from_raft_epoch:
-            with ContextManagers(self.deepspeed_zero_init_disabled_context_manager()):
-                if self.model_args.use_ema and (self.model_args.use_lora == False):
-                    self.model.vae=self.model.vae
-                    self.model.text_encoder=self.model.text_encoder
-            if self.model_args.use_lora:
-                self.model.set_lora_attn_proccessor_to_unet()
-            else: 
-                if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
-                    # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
-                    self.accelerator.register_save_state_pre_hook(self.save_model_hook)
-                    self.accelerator.register_load_state_pre_hook(self.load_model_hook)
-             
-            if self.finetuner_args.enable_xformers_memory_efficient_attention:
-                self.model.use_xformers()
+    def finetune(self, **kwargs):
+
+        if 'model' and 'dataset' in kwargs:
+            self.model = kwargs['model']
+            self.dataset = kwargs['dataset']
+
+        with ContextManagers(self.deepspeed_zero_init_disabled_context_manager()):
+            if self.model_args.use_ema and (self.model_args.use_lora == False):
+                self.model.vae=self.model.vae
+                self.model.text_encoder=self.model.text_encoder
+        if self.model_args.use_lora:
+            self.model.set_lora_attn_proccessor_to_unet()
+        else: 
+            if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
+                # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
+                self.accelerator.register_save_state_pre_hook(self.save_model_hook)
+                self.accelerator.register_load_state_pre_hook(self.load_model_hook)
+            
+        if self.finetuner_args.enable_xformers_memory_efficient_attention:
+            self.model.use_xformers()
 
 
         if self.model_args.use_lora :
@@ -244,7 +228,6 @@ class DiffusionFinetuner(Finetuner):
         if self.finetuner_args.gradient_checkpointing and (not self.model_args.use_lora):
             self.model.unet.enable_gradient_checkpointing()
             
-        # if self.raft_epoch==0:
         if self.model_args.use_lora:
             self.optimizer = self.optimizer_cls(
                 self.lora_layers.parameters(),
@@ -261,12 +244,10 @@ class DiffusionFinetuner(Finetuner):
                 weight_decay=self.finetuner_args.adam_weight_decay,
                 eps=self.finetuner_args.adam_epsilon,
             )
-        # self.optimizer = self.accelerator.prepare(self.optimizer)
+
         # Get training dataset and training dataloader
         train_dataset,self.accelerator = self.dataset.train_dataset(self.accelerator, self.finetuner_args.seed, self.finetuner_args.max_train_samples, self.model.tokenizer)
         train_dataloader = self.dataset.train_dataloader(self.data_args.train_batch_size)
-
-        self.finetuner_args.max_train_steps= self.training_steps_per_epoch*(self.raft_epoch+1)
 
         # # Scheduler and math around the number of training steps.
         self.overrode_max_train_steps = False
@@ -307,7 +288,7 @@ class DiffusionFinetuner(Finetuner):
         total_batch_size = self.data_args.train_batch_size * self.accelerator.num_processes * self.finetuner_args.gradient_accumulation_steps
         # print(self.accelerator._schedulers)
         logger.info("***** Running training *****")
-        logger.info(f"  Raft Epoch = {self.raft_epoch}")
+        
         logger.info(f"  Num examples = {len(train_dataset)}")
         logger.info(f"  Num Epochs = {self.finetuner_args.num_train_epochs}")
         logger.info(f"  Instantaneous batch size per device = {self.data_args.train_batch_size}")
@@ -317,24 +298,23 @@ class DiffusionFinetuner(Finetuner):
 
 
         # # Potentially load in the weights and states from a previous save
-        if self.raft_epoch==self.resume_from_raft_epoch:
-            self.resume_from_checkpoint, self.global_step, self.first_epoch, self.resume_step = self.model.resume_from_path(
-                                                                self.finetuner_args.resume_from_checkpoint, 
-                                                                self.finetuner_args.output_dir,
-                                                                self.finetuner_args.gradient_accumulation_steps,
-                                                                num_update_steps_per_epoch,
-                                                                self.accelerator)
-        else: 
-            resume_global_step = self.global_step * self.finetuner_args.gradient_accumulation_steps
-            self.first_epoch = self.global_step // num_update_steps_per_epoch
-            self.resume_step = resume_global_step % (num_update_steps_per_epoch * self.finetuner_args.gradient_accumulation_steps)
-            self.resume_from_checkpoint= None
+        self.resume_from_checkpoint, self.global_step, self.first_epoch, self.resume_step = self.model.resume_from_path(
+                                                            self.finetuner_args.resume_from_checkpoint, 
+                                                            self.finetuner_args.output_dir,
+                                                            self.finetuner_args.gradient_accumulation_steps,
+                                                            num_update_steps_per_epoch,
+                                                            self.accelerator)
+        # else: 
+        #     resume_global_step = self.global_step * self.finetuner_args.gradient_accumulation_steps
+        #     self.first_epoch = self.global_step // num_update_steps_per_epoch
+        #     self.resume_step = resume_global_step % (num_update_steps_per_epoch * self.finetuner_args.gradient_accumulation_steps)
+        #     self.resume_from_checkpoint= None
         
         # Only show the progress bar once on each machine.
         
         progress_bar = tqdm(range(self.global_step, self.finetuner_args.max_train_steps), disable=not self.accelerator.is_local_main_process)
         progress_bar.set_description("Steps")
-        # print(f"first_epoch:{self.first_epoch} \n num_train_epochs{self.finetuner_args.num_train_epochs} global_step:{self.global_step} max_train_steps:{self.finetuner_args.max_train_steps} ")
+
         for epoch in range(self.first_epoch, self.finetuner_args.num_train_epochs):
             self.model.unet.train()
             train_loss = 0.0
@@ -350,6 +330,7 @@ class DiffusionFinetuner(Finetuner):
                     latents = self.model.vae.encode(batch["pixel_values"].to(dtype=self.model.weight_dtype)).latent_dist.sample()
                     latents = latents * self.model.vae.config.scaling_factor
                     # latents = latents.to(self.accelerator.device)
+                    
                     # Sample noise that we'll add to the latents
                     noise = torch.randn_like(latents)
                     if self.finetuner_args.noise_offset:
@@ -434,7 +415,7 @@ class DiffusionFinetuner(Finetuner):
                         if self.accelerator.is_main_process:
                             # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
                             if self.finetuner_args.checkpoints_total_limit is not None:
-                                checkpoints = os.listdir(os.path.join(self.finetuner_args.output_dir,f"{self.raft_epoch}"))
+                                checkpoints = os.listdir(os.path.join(self.finetuner_args.output_dir))
                                 checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
                                 checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
 
@@ -461,12 +442,13 @@ class DiffusionFinetuner(Finetuner):
                 if self.global_step >= self.finetuner_args.max_train_steps:
                     break
                 
-                self.finetuner_args.learning_raate = self.lr_scheduler.get_last_lr()[0]
             # Make a validation log
             if self.finetuner_args.validation_prompts is not None:
                 self.model.log(self.finetuner_args,self.accelerator,self.global_step, self.data_args.resolution, 'validation')
+            
+            self.finetuner_args.learning_rate = self.lr_scheduler.get_last_lr()[0]
 
-        if self.raft_epoch==self.raft_args.epochs-1:
+        if self.finetuner_args.last_epoch:
             # Create the pipeline using the trained modules and save it.
             self.accelerator.wait_for_everyone()
             if self.accelerator.is_main_process:         
@@ -507,6 +489,35 @@ class RaftFinetuner(DiffusionFinetuner):
         super().__init__(finetuner_args)        
 
         
+        if self.finetuner_args.resume_from_checkpoint:
+            if self.finetuner_args.resume_from_checkpoint != "latest":
+                path = os.path.basename(self.finetuner_args.resume_from_checkpoint)
+            else:
+                # Get the most recent checkpoint
+                dirs = os.listdir(self.finetuner_args.output_dir)
+                dirs = [d for d in dirs if d.startswith("checkpoint")]
+                dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
+                path = dirs[-1] if len(dirs) > 0 else None
+                self.global_step = int(path.split("-")[1])
+                resume_global_step = self.global_step * self.finetuner_args.gradient_accumulation_steps
+                self.resume_from_raft_epoch = int(int(path.split("-")[1]) / self.finetuner_args.max_train_steps)
+                self.raft_epoch = self.resume_from_raft_epoch 
+                self.raft_args.epochs+= self.raft_epoch
+                self.finetuner_args.max_train_steps+= resume_global_step
+            if path is None:
+                self.accelerator.print(
+                    f"Checkpoint '{self.finetuner_args.resume_from_checkpoint}' does not exist. Starting a new training run."
+                )
+                self.raft_epoch = 0
+                self.resume_from_raft_epoch = 0
+        else:
+            self.raft_epoch = 0
+            self.resume_from_raft_epoch = 0
+
+        self.training_steps_per_epoch=self.finetuner_args.max_train_steps
+        self.finetuner_args.resume_from_checkpoint = None
+        self.finetuner_args.last_epoch  = False
+        
     def raft_finetune(self, model, dataset):
         self.model=model
         self.dataset=dataset
@@ -522,7 +533,7 @@ class RaftFinetuner(DiffusionFinetuner):
         self.model.load_score_model(self.raft_args.clip_model_pretrained_or_path,self.raft_args.score_model, self.accelerator.device)
 
         # Get dataloader to perform RAFT
-        inference_dataloader=self.dataset.inference_dataloader(self.raft_args.inference_batch_size)
+        raft_dataloader=self.dataset.raft_dataloader(self.raft_args.inference_batch_size)
         
         generator = torch.Generator(device=self.accelerator.device)
         if self.finetuner_args.seed is not None:
@@ -552,7 +563,7 @@ class RaftFinetuner(DiffusionFinetuner):
             
             # Use Raft Algorithm 
             training_prompts=[]
-            for step, prompts in enumerate(inference_dataloader):
+            for step, prompts in enumerate(raft_dataloader):
 
                 # Get negative prompts for raft pipeline
                 if self.raft_args.negative_prompt:
@@ -618,8 +629,13 @@ class RaftFinetuner(DiffusionFinetuner):
                 images[i].save(f'/home/deepanshu/LMFlow-diffusion-main/examples/images/{self.raft_epoch}/{i}.png')
 
             # Prepare dataset for finetuning
-            self.dataset.prepare_finetune_dataset(images, texts)
+            self.dataset.prepare_raft_finetuner_dataset(images, texts)
+
             # Finetune
+            logger.info(f"  Raft Epoch = {self.raft_epoch}")
+            self.finetuner_args.max_train_steps = self.training_steps_per_epoch*(self.raft_epoch+1)
+            if self.raft_epoch==self.raft_args.epochs-1:
+                self.finetuner_args.last_epoch = True
             self.finetune()  
             torch.cuda.empty_cache()
         
@@ -629,10 +645,10 @@ class RaftFinetuner(DiffusionFinetuner):
             self.model.to_device(self.accelerator.device)
             finetuned_model_pipeline = self.model.load_model_pipeline(self.accelerator)
             finetuned_model_pipeline.enable_xformers_memory_efficient_attention()
-            if self.raft_args.pipeline_scheduler:
-                finetuned_model_pipeline.scheduler = self.model.load_scheduler(self.raft_args.pipeline_scheduler, finetuned_model_pipeline)
+            # if self.raft_args.pipeline_scheduler:
+            #     finetuned_model_pipeline.scheduler = self.model.load_scheduler(self.raft_args.pipeline_scheduler, finetuned_model_pipeline)
             self.accelerator.free_memory()
-            for step, prompts in enumerate(inference_dataloader):
+            for step, prompts in enumerate(raft_dataloader):
                 prompts=prompts['text']
                 generator = torch.Generator(device=self.accelerator.device)
                 if self.model_args.use_lora :

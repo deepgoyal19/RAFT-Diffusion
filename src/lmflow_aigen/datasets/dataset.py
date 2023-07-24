@@ -32,7 +32,7 @@ class ImageDataset:
     kwargs : Optional.
         Keyword arguments.
     """
-    def __init__(self, data_args=None, *args, **kwargs):
+    def __init__(self, data_args=None):
         self.data_args=data_args
 
         # Get the datasets: you can either provide your own training and evaluation files (see below)
@@ -42,29 +42,41 @@ class ImageDataset:
         # download the dataset.
         if self.data_args.dataset_name is not None:
             # Downloading and loading a dataset from the hub.
-            self.inference_dataset = load_dataset(
+            self.dataset = load_dataset(
                 self.data_args.dataset_name,
                 self.data_args.dataset_config_name,
                 cache_dir=self.data_args.cache_dir,
             )
         elif  self.data_args.train_data_dir is not None:
-            self.inference_dataset = load_dataset(
-                "text",
-                data_dir=self.data_args.train_data_dir,
-                cache_dir=self.data_args.cache_dir,
+            data_files = {}
+            if self.data_args.overrode_init_dataset:
+                self.dataset = load_dataset(
+                    "text",
+                    data_dir=self.data_args.train_data_dir,
+                    cache_dir=self.data_args.cache_dir,
+                    )
+            else:
+                data_files["train"] = os.path.join(self.data_args.train_data_dir, "**")
+                self.dataset = load_dataset(
+                    "imagefolder",
+                    data_files=data_files,
+                    cache_dir=self.data_args.cache_dir,
                 )
         else:
-            raise ValueError('Pease specify the name of the dataset or provide the path to a folder that includes a text file.')
+                raise ValueError('Pease specify the name of the dataset or provide the path to a folder that includes a text file.')
+        
+        if self.data_args.overrose_init_dataset:
+            self.prepare_plain_finetuner_dataset()
 
 
-    def inference_dataloader(self,batch_size):
+    def raft_dataloader(self,batch_size):
         dataloader=torch.utils.data.DataLoader(
-            self.inference_dataset['train'],
+            self.dataset['train'],
             shuffle=False,
             batch_size=batch_size)
         return dataloader
     
-    def prepare_finetune_dataset(self, images, texts):
+    def prepare_raft_finetuner_dataset(self, images, texts):
         # Get the datasets: you can either provide your own training and evaluation files (see below)
         # or specify a Dataset from the hub (the dataset will be downloaded automatically from the datasets Hub).
 
@@ -91,7 +103,47 @@ class ImageDataset:
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
-            
+    
+    def prepare_plain_finetuner_dataset(self):
+        # Preprocessing the datasets.
+        # We need to tokenize inputs and targets.
+        DATASET_NAME_MAPPING = {
+            "lambdalabs/pokemon-blip-captions": ("image", "text"),
+        }   
+
+        column_names = self.dataset["train"].column_names
+
+        # 6. Get the column names for input/target.
+        dataset_columns = DATASET_NAME_MAPPING.get(self.data_args.dataset_name, None)
+        if self.data_args.image_column is None:
+            image_column = dataset_columns[0] if dataset_columns is not None else column_names[0]
+        else:
+            image_column = self.data_args.image_column
+            if image_column not in column_names:
+                raise ValueError(
+                    f"--image_column' value '{self.data_args.image_column}' needs to be one of: {', '.join(column_names)}"
+                )
+        if self.data_args.caption_column is None:
+            caption_column = dataset_columns[1] if dataset_columns is not None else column_names[1]
+        else:
+            caption_column = self.data_args.caption_column
+            if caption_column not in column_names:
+                raise ValueError(
+                    f"--caption_column' value '{self.data_args.caption_column}' needs to be one of: {', '.join(column_names)}"
+                )
+        
+        # Preprocessing the datasets.
+        self.train_transforms = transforms.Compose(
+            [
+                transforms.Resize(self.data_args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.CenterCrop(self.data_args.resolution) if self.data_args.center_crop else transforms.RandomCrop(args.resolution),
+                transforms.RandomHorizontalFlip() if self.data_args.random_flip else transforms.Lambda(lambda x: x),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5], [0.5]),
+            ]
+        )
+        
+
     def tokenize_captions(self, examples, is_train=True):
         captions = []
         for caption in examples[self.caption_column]:

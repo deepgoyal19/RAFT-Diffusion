@@ -39,6 +39,7 @@ def main():
     else:
         finetuner_args, model_args, data_args, raft_args = parser.parse_args_into_dataclasses()
 
+
     # Initialization
     raft_finetuner = RaftFinetuner(raft_args=raft_args, data_args=data_args, model_args=model_args, finetuner_args=finetuner_args)
     model = DiffusionModel(model_args)
