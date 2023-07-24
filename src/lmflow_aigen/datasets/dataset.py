@@ -42,13 +42,13 @@ class ImageDataset:
         # download the dataset.
         if self.data_args.dataset_name is not None:
             # Downloading and loading a dataset from the hub.
+            # Downloading and loading a dataset from the hub.
             self.dataset = load_dataset(
                 self.data_args.dataset_name,
                 self.data_args.dataset_config_name,
                 cache_dir=self.data_args.cache_dir,
             )
         elif  self.data_args.train_data_dir is not None:
-            data_files = {}
             if self.data_args.overrode_init_dataset:
                 self.dataset = load_dataset(
                     "text",
@@ -56,6 +56,7 @@ class ImageDataset:
                     cache_dir=self.data_args.cache_dir,
                     )
             else:
+                data_files = {} 
                 data_files["train"] = os.path.join(self.data_args.train_data_dir, "**")
                 self.dataset = load_dataset(
                     "imagefolder",
@@ -65,13 +66,13 @@ class ImageDataset:
         else:
                 raise ValueError('Pease specify the name of the dataset or provide the path to a folder that includes a text file.')
         
-        if self.data_args.overrose_init_dataset:
+        if not self.data_args.overrode_init_dataset:
             self.prepare_plain_finetuner_dataset()
 
 
     def raft_dataloader(self,batch_size):
         dataloader=torch.utils.data.DataLoader(
-            self.dataset['train'],
+            self.dataset["train"],
             shuffle=False,
             batch_size=batch_size)
         return dataloader
@@ -110,33 +111,35 @@ class ImageDataset:
         DATASET_NAME_MAPPING = {
             "lambdalabs/pokemon-blip-captions": ("image", "text"),
         }   
-
         column_names = self.dataset["train"].column_names
+        self.dataset = self.dataset["train"]
 
         # 6. Get the column names for input/target.
         dataset_columns = DATASET_NAME_MAPPING.get(self.data_args.dataset_name, None)
+
         if self.data_args.image_column is None:
-            image_column = dataset_columns[0] if dataset_columns is not None else column_names[0]
+            self.image_column = dataset_columns[0] if dataset_columns is not None else column_names[0]
         else:
-            image_column = self.data_args.image_column
-            if image_column not in column_names:
+            self.image_column = self.data_args.image_column
+            if self.image_column not in column_names:
                 raise ValueError(
                     f"--image_column' value '{self.data_args.image_column}' needs to be one of: {', '.join(column_names)}"
                 )
+
         if self.data_args.caption_column is None:
-            caption_column = dataset_columns[1] if dataset_columns is not None else column_names[1]
+            self.caption_column = dataset_columns[1] if dataset_columns is not None else column_names[1]
         else:
-            caption_column = self.data_args.caption_column
-            if caption_column not in column_names:
+            self.caption_column = self.data_args.caption_column
+            if self.caption_column not in column_names:
                 raise ValueError(
                     f"--caption_column' value '{self.data_args.caption_column}' needs to be one of: {', '.join(column_names)}"
                 )
-        
+
         # Preprocessing the datasets.
         self.train_transforms = transforms.Compose(
             [
                 transforms.Resize(self.data_args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-                transforms.CenterCrop(self.data_args.resolution) if self.data_args.center_crop else transforms.RandomCrop(args.resolution),
+                transforms.CenterCrop(self.data_args.resolution) if self.data_args.center_crop else transforms.RandomCrop(self.data_args.resolution),
                 transforms.RandomHorizontalFlip() if self.data_args.random_flip else transforms.Lambda(lambda x: x),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),

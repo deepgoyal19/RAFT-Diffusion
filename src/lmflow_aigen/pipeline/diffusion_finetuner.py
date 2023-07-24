@@ -119,6 +119,7 @@ class DiffusionFinetuner(Finetuner):
             self.model_args = kwargs['model_args']
             self.data_args = kwargs['data_args']
 
+
         # Make one log on every process with the configuration for debugging.
         logging.basicConfig(
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -199,6 +200,12 @@ class DiffusionFinetuner(Finetuner):
         if 'model' and 'dataset' in kwargs:
             self.model = kwargs['model']
             self.dataset = kwargs['dataset']
+            # For mixed precision training we cast the text_encoder and vae weights to half-precision
+            # as these models are only used for inference, keeping weights in full precision is not required.
+            self.model.set_weight_dtype(self.accelerator.mixed_precision)
+
+            # Set device 
+            self.model.to_device(self.accelerator.device)
 
         with ContextManagers(self.deepspeed_zero_init_disabled_context_manager()):
             if self.model_args.use_ema and (self.model_args.use_lora == False):
