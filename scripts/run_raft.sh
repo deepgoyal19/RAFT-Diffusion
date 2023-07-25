@@ -1,4 +1,3 @@
-output_dir=${proj}
 accelerate launch examples/raft.py \
         --output_dir '/home/deepanshu/LMFlow-diffusion-main/examples/model' \
         --enable_xformers_memory_efficient_attention True \
@@ -6,7 +5,7 @@ accelerate launch examples/raft.py \
         --lr_scheduler 'constant' \
         --learning_rate 9e-6 \
         --lr_warmup_steps 0 \
-        --max_train_steps 1 \
+        --max_train_steps 50 \
         --gradient_checkpointing True \
         --max_grad_norm 1 \
         --tracker_project_name "text2image-fine-tune" \
@@ -18,15 +17,15 @@ accelerate launch examples/raft.py \
         --train_batch_size 5 \
         --topk 5 \
         --inference_batch_size 10 \
-        --epochs 7 \
+        --epochs 8 \
         --num_images_per_prompt 10 \
         --clip_model_pretrained_or_path 'ViT-L/14' \
         --score_model 'clip' \
         --save_finetune_images True \
         --grid True \
-        --num_inference_steps 1 \
-        --checkpointing_step 350 \
+        --num_inference_steps 50 \
+        --checkpointing_step 50 \
         --negative_prompt 'painting, sketch, drawing, noise, bad' \
-        --noise_offset -0.1 \
-        --pipeline_scheduler 'DDPMScheduler'
+        --pipeline_scheduler 'DDPMScheduler' \
+        --save_raft_image True
 

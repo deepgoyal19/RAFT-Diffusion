@@ -514,6 +514,9 @@ class RaftFinetuner(DiffusionFinetuner):
         self.finetuner_args.resume_from_checkpoint = None
         self.finetuner_args.last_epoch  = False
 
+        if os.path.exists(os.path.join(self.finetuner_args.output_dir,'raft_images')):
+                        shutil.rmtree(os.path.join(self.finetuner_args.output_dir,'raft_images'))
+        os.makedirs(os.path.join(self.finetuner_args.output_dir,'raft_images'))
         
     def raft_finetune(self, model, dataset):
         self.model=model
@@ -621,10 +624,12 @@ class RaftFinetuner(DiffusionFinetuner):
             images = [row[0] for row in training_prompts]
             texts = [row[1] for row in training_prompts]
 
-            for i in range(len(images)):
-                if not os.path.exists(f"/home/deepanshu/LMFlow-diffusion-main/examples/images/{self.raft_epoch}/"):
-                    os.makedirs(f"/home/deepanshu/LMFlow-diffusion-main/examples/images/{self.raft_epoch}/")
-                images[i].save(f'/home/deepanshu/LMFlow-diffusion-main/examples/images/{self.raft_epoch}/{i}.png')
+            if self.raft_args.save_raft_images:
+                for i in range(len(images)):
+                    if os.path.exists(f"{os.path.join(self.finetuner_args.output_dir,'raft_images')}/raft_epoch-{self.raft_epoch}"):
+                        shutil.rmtree(f"{os.path.join(self.finetuner_args.output_dir,'raft_images')}/raft_epoch-{self.raft_epoch}")
+                    os.makedirs(f"{os.path.join(self.finetuner_args.output_dir,'raft_images')}/raft_epoch-{self.raft_epoch}")
+                    images[i].save(f"{os.path.join(self.finetuner_args.output_dir,'raft_images')}/raft_epoch-{self.raft_epoch}/{i}.png")
 
             # Prepare dataset for finetuning
             self.dataset.prepare_raft_finetuner_dataset(images, texts)
@@ -684,16 +689,10 @@ class RaftFinetuner(DiffusionFinetuner):
                     grid.paste(img, box=(i%cols*w, i//cols*h))
                 
                 if self.finetuner_args.output_dir:
-                    if os.path(os.path.join(self.finetuner_args.output_dir,'raft_images')):
-                        shutil.rmtree(os.path.join(self.finetuner_args.output_dir,'raft_images'))
-                    os.makedirs(os.path.join(self.finetuner_args.output_dir,'raft_images'))
                     grid.save(f"{self.finetuner_args.output_dir}/raft_images/output.{self.raft_args.save_format}")
             else:
                 # Save all images
                 if self.finetuner_args.output_dir:
-                    if os.path(os.path.join(self.finetuner_args.output_dir,'raft_images')):
-                        shutil.rmtree(os.path.join(self.finetuner_args.output_dir,'raft_images'))
-                    os.makedirs(os.path.join(self.finetuner_args.output_dir,'raft_images'))
                     for len_images in range(len(images)):
                         images[len_images].save(f"{self.finetuner_args.output_dir}/raft_images/{len_images}.{self.raft_args.save_format}")
 

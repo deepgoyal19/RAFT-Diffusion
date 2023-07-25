@@ -329,5 +329,7 @@ class RaftFinetunerArguments:
                 less than `1`).'''})
 
     pipeline_scheduler: Optional[str]= field(
-        default= None, metadata={"help":"", "choices": ['DDPMScheduler', 'PNDMScheduler', 'LMSDiscreteScheduler', 'EulerDiscreteScheduler', 'EulerAncestralDiscreteScheduler', 'DPMSolverMultistepScheduler']}
-    )
+        default= None, metadata={"help":"", "choices": ['DDPMScheduler', 'PNDMScheduler', 'LMSDiscreteScheduler', 'EulerDiscreteScheduler', 'EulerAncestralDiscreteScheduler', 'DPMSolverMultistepScheduler']})
+    
+    save_raft_images: bool= field(
+        default= False, metadata={"help" : "Save topk images every epoch"})
