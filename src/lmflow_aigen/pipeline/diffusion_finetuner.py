@@ -169,7 +169,6 @@ class DiffusionFinetuner(Finetuner):
 
         self.global_step = 0
         self.first_epoch = 0
-        self.training_steps_per_epoch=self.finetuner_args.max_train_steps
 
         # We need to initialize the trackers we use, and also store our configuration.
         # The trackers initializes automatically on the main process.
@@ -211,7 +210,7 @@ class DiffusionFinetuner(Finetuner):
             if self.model_args.use_ema and (self.model_args.use_lora == False):
                 self.model.vae=self.model.vae
                 self.model.text_encoder=self.model.text_encoder
-        if self.model_args.use_lora:
+        if self.model_args.use_lora :
             self.model.set_lora_attn_proccessor_to_unet()
         else: 
             if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
@@ -305,17 +304,18 @@ class DiffusionFinetuner(Finetuner):
 
 
         # # Potentially load in the weights and states from a previous save
-        self.resume_from_checkpoint, self.global_step, self.first_epoch, self.resume_step = self.model.resume_from_path(
-                                                            self.finetuner_args.resume_from_checkpoint, 
-                                                            self.finetuner_args.output_dir,
-                                                            self.finetuner_args.gradient_accumulation_steps,
-                                                            num_update_steps_per_epoch,
-                                                            self.accelerator)
-        # else: 
-        #     resume_global_step = self.global_step * self.finetuner_args.gradient_accumulation_steps
-        #     self.first_epoch = self.global_step // num_update_steps_per_epoch
-        #     self.resume_step = resume_global_step % (num_update_steps_per_epoch * self.finetuner_args.gradient_accumulation_steps)
-        #     self.resume_from_checkpoint= None
+        if self.finetuner_args.resume_from_checkpoint is not None:
+            self.resume_from_checkpoint, self.global_step, self.first_epoch, self.resume_step = self.model.resume_from_path(
+                                                                self.finetuner_args.resume_from_checkpoint, 
+                                                                self.finetuner_args.output_dir,
+                                                                self.finetuner_args.gradient_accumulation_steps,
+                                                                num_update_steps_per_epoch,
+                                                                self.accelerator)
+        else: 
+            resume_global_step = self.global_step * self.finetuner_args.gradient_accumulation_steps
+            self.first_epoch = self.global_step // num_update_steps_per_epoch
+            self.resume_step = resume_global_step % (num_update_steps_per_epoch * self.finetuner_args.gradient_accumulation_steps)
+            self.resume_from_checkpoint= None
         
         # Only show the progress bar once on each machine.
         
@@ -643,6 +643,8 @@ class RaftFinetuner(DiffusionFinetuner):
             self.finetuner_args.max_train_steps = self.training_steps_per_epoch*(self.raft_epoch+1)
             if self.raft_epoch==self.raft_args.epochs-1:
                 self.finetuner_args.last_epoch = True
+            # if self.raft_epoch>0:
+            #     self.overrode_checkpointing = True
             self.finetune()  
             torch.cuda.empty_cache()
         
