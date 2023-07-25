@@ -139,16 +139,7 @@ class DiffusionFinetuner(Finetuner):
             gradient_accumulation_steps=self.finetuner_args.gradient_accumulation_steps,
             log_with=self.finetuner_args.report_to,
             project_config=self.accelerator_project_config)
-        
-        # if self.model_args.use_lora:
-        #     if self.finetuner_args.report_to == "wandb":
-        #         if not is_wandb_available():
-        #             raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
-        #         import wandb
-        #         wandb.init(project=self.finetuner_args.tracker_project_name, config={'allow_val_change':True})
-
                 
-        # Initialize the optimizer
 
         if self.finetuner_args.use_8bit_adam:
             try:
@@ -196,30 +187,33 @@ class DiffusionFinetuner(Finetuner):
  
     def finetune(self, **kwargs):
 
-        if 'model' and 'dataset' in kwargs:
-            self.model = kwargs['model']
-            self.dataset = kwargs['dataset']
-            # For mixed precision training we cast the text_encoder and vae weights to half-precision
-            # as these models are only used for inference, keeping weights in full precision is not required.
-            self.model.set_weight_dtype(self.accelerator.mixed_precision)
 
-            # Set device 
-            self.model.to_device(self.accelerator.device)
+        if self.finetuner_args.overrode_finetuner is False:
+            if 'model' and 'dataset' in kwargs:
+                self.model = kwargs['model']
+                self.dataset = kwargs['dataset']
+                # For mixed precision training we cast the text_encoder and vae weights to half-precision
+                # as these models are only used for inference, keeping weights in full precision is not required.
+                self.model.set_weight_dtype(self.accelerator.mixed_precision)
 
-        with ContextManagers(self.deepspeed_zero_init_disabled_context_manager()):
-            if self.model_args.use_ema and (self.model_args.use_lora == False):
-                self.model.vae=self.model.vae
-                self.model.text_encoder=self.model.text_encoder
-        if self.model_args.use_lora :
-            self.model.set_lora_attn_proccessor_to_unet()
-        else: 
-            if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
-                # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
-                self.accelerator.register_save_state_pre_hook(self.save_model_hook)
-                self.accelerator.register_load_state_pre_hook(self.load_model_hook)
-            
-        if self.finetuner_args.enable_xformers_memory_efficient_attention:
-            self.model.use_xformers()
+                # Set device 
+                self.model.to_device(self.accelerator.device)
+
+            with ContextManagers(self.deepspeed_zero_init_disabled_context_manager()):
+                if self.model_args.use_ema and (self.model_args.use_lora == False):
+                    self.model.vae=self.model.vae
+                    self.model.text_encoder=self.model.text_encoder
+
+            if self.model_args.use_lora :
+                self.model.set_lora_attn_proccessor_to_unet()
+            else: 
+                if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
+                    # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
+                    self.accelerator.register_save_state_pre_hook(self.save_model_hook)
+                    self.accelerator.register_load_state_pre_hook(self.load_model_hook)
+                
+            if self.finetuner_args.enable_xformers_memory_efficient_attention:
+                self.model.use_xformers()
 
 
         if self.model_args.use_lora :
@@ -294,12 +288,12 @@ class DiffusionFinetuner(Finetuner):
         total_batch_size = self.data_args.train_batch_size * self.accelerator.num_processes * self.finetuner_args.gradient_accumulation_steps
         # print(self.accelerator._schedulers)
         logger.info("***** Running training *****")
-        
-        logger.info(f"  Num examples = {len(train_dataset)}")
-        logger.info(f"  Num Epochs = {self.finetuner_args.num_train_epochs}")
-        logger.info(f"  Instantaneous batch size per device = {self.data_args.train_batch_size}")
-        logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
-        logger.info(f"  Gradient Accumulation steps = {self.finetuner_args.gradient_accumulation_steps}")
+        if self.finetuner_args.overrode_finetuner is False:
+            logger.info(f"  Num examples = {len(train_dataset)}")
+            logger.info(f"  Num Epochs = {self.finetuner_args.num_train_epochs}")
+            logger.info(f"  Instantaneous batch size per device = {self.data_args.train_batch_size}")
+            logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
+            logger.info(f"  Gradient Accumulation steps = {self.finetuner_args.gradient_accumulation_steps}")
         logger.info(f"  Total optimization steps = {self.finetuner_args.max_train_steps}")
 
 
@@ -318,7 +312,6 @@ class DiffusionFinetuner(Finetuner):
             self.resume_from_checkpoint= None
         
         # Only show the progress bar once on each machine.
-        
         progress_bar = tqdm(range(self.global_step, self.finetuner_args.max_train_steps), disable=not self.accelerator.is_local_main_process)
         progress_bar.set_description("Steps")
 
@@ -643,7 +636,8 @@ class RaftFinetuner(DiffusionFinetuner):
             self.finetuner_args.max_train_steps = self.training_steps_per_epoch*(self.raft_epoch+1)
             if self.raft_epoch==self.raft_args.epochs-1:
                 self.finetuner_args.last_epoch = True
-            # if self.raft_epoch>0:
+            if self.raft_epoch>0:
+                self.finetuner_args.overrode_finetuner = True
             #     self.overrode_checkpointing = True
             self.finetune()  
             torch.cuda.empty_cache()

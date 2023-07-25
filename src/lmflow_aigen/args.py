@@ -12,9 +12,13 @@ import torch
 
 @dataclass
 class FinetunerArguments:
+
+    overrode_finetuner: bool= field(
+        default=False, metadata={"help":""})
+    
     last_epoch: bool= field(
-        default=True, metadata={"help":""}
-    )
+        default=True, metadata={"help":""})
+    
     prediction_type: str= field(
         default=None, metadata={"help": "The prediction_type that shall be used for training."
                                 "Choose between 'epsilon' or 'v_prediction' or leave `None`. "
