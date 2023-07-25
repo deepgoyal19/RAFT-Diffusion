@@ -2,7 +2,7 @@
 # coding=utf-8
 """The Finetuner class simplifies the process of running finetuning process on a language model for a TunableModel instance with given dataset. 
 """
-
+import os
 import torch
 import torch.nn.functional as F
 from accelerate import Accelerator
@@ -26,6 +26,8 @@ class DiffusionInferencer:
 
         self.generator = torch.Generator(device=self.accelerator.device)
 
+        if self.inference_args.save_image_dir is not None:
+                os.makedirs(self.inference_args.save_image_dir, exist_ok=True)
         # if self.inference_args.seed is not None:
         #     self.generator = self.generator.manual_seed(self.inference_args.seed)
 
