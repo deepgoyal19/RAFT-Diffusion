@@ -11,7 +11,7 @@ from diffusers import  StableDiffusionPipeline
 from tqdm.auto import tqdm
 from diffusers.optimization import get_scheduler
 from PIL import Image
-
+import shutil   
 
 class DiffusionInferencer:
     def __init__(self, inference_args):
@@ -25,11 +25,11 @@ class DiffusionInferencer:
             self.weight_dtype = torch.bfloat16
 
         self.generator = torch.Generator(device=self.accelerator.device)
+        if self.inference_args.seed is not None:
+            self.generator = self.generator.manual_seed(self.inference_args.seed)
 
         if self.inference_args.save_image_dir is not None:
                 os.makedirs(self.inference_args.save_image_dir, exist_ok=True)
-        # if self.inference_args.seed is not None:
-        #     self.generator = self.generator.manual_seed(self.inference_args.seed)
 
     def inference(self):   
         pipeline = StableDiffusionPipeline.from_pretrained(
@@ -58,10 +58,11 @@ class DiffusionInferencer:
                     height=self.inference_args.height,
                     num_inference_steps=self.inference_args.num_inference_steps,
                     generator=self.generator).images
-        
+     
         # delete pipeline
         del pipeline 
 
+        # Return images and save
         if self.inference_args.grid:
             rows=int(len(images)/self.inference_args.num_images_per_prompt)
             cols=self.inference_args.num_images_per_prompt
@@ -73,10 +74,17 @@ class DiffusionInferencer:
                 grid.paste(img, box=(i%cols*w, i//cols*h))
             
             if self.inference_args.save_image_dir:
-                grid.save(f"{self.inference_args.save_image_dir}/output.{self.inference_args.save_format}")
+                if os.path.exists(os.path.join(self.inference_args.save_image_dir,'inference_images')):
+                        shutil.rmtree(os.path.join(self.inference_args.save_image_dir,'inference_images'))
+                        os.makedirs(os.path.join(self.inference_args.save_image_dir,'inference_images'))
+                grid.save(f"{self.inference_args.save_image_dir}/inference_images/output.{self.inference_args.save_format}")
             return grid
         else:
             if self.inference_args.save_image_dir:
+                if self.inference_args.save_image_dir is not None:
+                    if os.path.exists(os.path.join(self.inference_args.save_image_dir,'inference_images')):
+                        shutil.rmtree(os.path.join(self.inference_args.save_image_dir,'inference_images'))
+                    os.makedirs(os.path.join(self.inference_args.save_image_dir,'inference_images'))
                 for len_images in range(len(images)):
-                    images[len_images].save(f"{self.inference_args.save_image_dir}/{len_images}.{self.inference_args.save_format}")
-            return images
+                    images[len_images].save(f"{self.inference_args.save_image_dir}/inference_images/{len_images}.{self.inference_args.save_format}")
+            return images   
