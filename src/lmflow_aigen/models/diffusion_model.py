@@ -10,19 +10,19 @@ from pathlib import Path
 import torch
 from huggingface_hub import create_repo, upload_folder
 from transformers import CLIPTextModel, CLIPTokenizer, AutoProcessor, AutoModel
-from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel, StableDiffusionPipeline
+from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel, StableDiffusionPipeline, DDPMScheduler
 from diffusers.training_utils import EMAModel
 from diffusers.utils import check_min_version, is_wandb_available, deprecate
 from diffusers.models.attention_processor import LoRAAttnProcessor
 from diffusers.utils.import_utils import is_xformers_available
 from packaging import version
 import numpy as np 
-from transformers import CLIPProcessor, CLIPModel
 from os.path import expanduser  # pylint: disable=import-outside-toplevel
 from urllib.request import urlretrieve  # pylint: disable=import-outside-toplevel
 import torch.nn as nn
 import open_clip
 import clip
+import importlib
 if is_wandb_available():
     import wandb
 
@@ -193,11 +193,11 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
                 # raft_epochs+= raft_epoch
                 # max_training_step+= resume_global_step
                 return resume_from_checkpoint, global_step, first_epoch, resume_step
-        else:
-            resume_step = None
-            global_step = 0
-            first_epoch = 0
-            return resume_from_checkpoint, global_step, first_epoch, resume_step
+        # else:
+        #     resume_step = None
+        #     global_step = 0
+        #     first_epoch = 0
+        #     return resume_from_checkpoint, global_step, first_epoch, resume_step
 
     def set_weight_dtype(self, mixed_precision):
         self.weight_dtype = torch.float32
@@ -480,7 +480,10 @@ These are LoRA adaption weights for {base_model}. The weights were fine-tuned on
         max_score=max(scores)
         return [max_score,scores.index(max_score)]
 
-    def load_scheduler(self, scheduler, pipeline):
-        print(scheduler)
-        exec(f'scheduler = {scheduler}.from_config({pipeline.scheduler.config})')
+    def load_pipeline_scheduler(self, pipeline):
+        scheduler=self.pipeline_scheduler.from_config(pipeline.scheduler.config)
         return scheduler      
+    
+    def import_pipeline_scheduler(self, scheduler):     
+        self.pipeline_scheduler = getattr(importlib.import_module('diffusers'), scheduler)
+

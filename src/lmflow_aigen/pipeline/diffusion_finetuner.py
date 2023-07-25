@@ -15,12 +15,11 @@ import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
 from accelerate.utils import ProjectConfiguration, set_seed
-from diffusers import  DiffusionPipeline, UNet2DConditionModel
+from diffusers import  UNet2DConditionModel
 from packaging import version
 from tqdm.auto import tqdm
 from transformers.utils import ContextManagers
 import diffusers
-from diffusers import DPMSolverMultistepScheduler
 from diffusers import UNet2DConditionModel
 from diffusers.loaders import AttnProcsLayers
 from diffusers.optimization import get_scheduler
@@ -517,6 +516,7 @@ class RaftFinetuner(DiffusionFinetuner):
         self.training_steps_per_epoch=self.finetuner_args.max_train_steps
         self.finetuner_args.resume_from_checkpoint = None
         self.finetuner_args.last_epoch  = False
+
         
     def raft_finetune(self, model, dataset):
         self.model=model
@@ -539,8 +539,8 @@ class RaftFinetuner(DiffusionFinetuner):
         if self.finetuner_args.seed is not None:
             generator = generator.manual_seed(self.finetuner_args.seed)
 
-        # if self.raft_args.pipeline_scheduler:
-        #     exec(f'from diffusers import {self.raft_args.pipeline_scheduler}')
+        if self.raft_args.pipeline_scheduler:
+            self.model.import_pipeline_scheduler(self.raft_args.pipeline_scheduler)
 
         # Run RAFT 
         for self.raft_epoch in range(self.resume_from_raft_epoch,self.raft_args.epochs):
@@ -558,8 +558,8 @@ class RaftFinetuner(DiffusionFinetuner):
                 pipeline.enable_xformers_memory_efficient_attention()
 
             
-            # if self.raft_args.pipeline_scheduler:
-            #     pipeline.scheduler = self.model.load_scheduler(self.raft_args.pipeline_scheduler, pipeline)
+            if self.raft_args.pipeline_scheduler:
+                pipeline.scheduler = self.model.load_pipeline_scheduler(pipeline)
             
             # Use Raft Algorithm 
             training_prompts=[]
@@ -638,7 +638,7 @@ class RaftFinetuner(DiffusionFinetuner):
                 self.finetuner_args.last_epoch = True
             if self.raft_epoch>0:
                 self.finetuner_args.overrode_finetuner = True
-            #     self.overrode_checkpointing = True
+
             self.finetune()  
             torch.cuda.empty_cache()
         
