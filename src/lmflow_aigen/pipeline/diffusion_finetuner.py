@@ -625,10 +625,10 @@ class RaftFinetuner(DiffusionFinetuner):
             texts = [row[1] for row in training_prompts]
 
             if self.raft_args.save_raft_images:
+                if os.path.exists(f"{os.path.join(self.finetuner_args.output_dir,'raft_images')}/raft_epoch-{self.raft_epoch}"):
+                    shutil.rmtree(f"{os.path.join(self.finetuner_args.output_dir,'raft_images')}/raft_epoch-{self.raft_epoch}")
+                os.makedirs(f"{os.path.join(self.finetuner_args.output_dir,'raft_images')}/raft_epoch-{self.raft_epoch}")
                 for i in range(len(images)):
-                    if os.path.exists(f"{os.path.join(self.finetuner_args.output_dir,'raft_images')}/raft_epoch-{self.raft_epoch}"):
-                        shutil.rmtree(f"{os.path.join(self.finetuner_args.output_dir,'raft_images')}/raft_epoch-{self.raft_epoch}")
-                    os.makedirs(f"{os.path.join(self.finetuner_args.output_dir,'raft_images')}/raft_epoch-{self.raft_epoch}")
                     images[i].save(f"{os.path.join(self.finetuner_args.output_dir,'raft_images')}/raft_epoch-{self.raft_epoch}/{i}.png")
 
             # Prepare dataset for finetuning
