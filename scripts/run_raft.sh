@@ -1,4 +1,4 @@
-accelerate launch examples/raft.py \
+accelerate launch --config_file configs/accelerator_singlegpu_config.yaml examples/raft.py \
         --output_dir '/home/deepanshu/LMFlow-diffusion-main/examples/model' \
         --enable_xformers_memory_efficient_attention True \
         --gradient_accumulation_steps 1 \
@@ -16,16 +16,15 @@ accelerate launch examples/raft.py \
         --dataset_name '/home/deepanshu/LMFlow-diffusion-main/a' \
         --train_batch_size 5 \
         --topk 5 \
-        --inference_batch_size 10 \
+        --inference_batch_size 20 \
         --epochs 8 \
         --num_images_per_prompt 10 \
-        --clip_model_pretrained_or_path 'ViT-L/14' \
-        --score_model 'clip' \
+        --clip_model_pretrained_or_path 'ViT-L-14' \
+        --score_model 'aesthetic' \
         --save_finetune_images True \
         --grid True \
-        --num_inference_steps 50 \
-        --checkpointing_step 50 \
-        --negative_prompt 'painting, sketch, drawing, noise, bad' \
+        --num_inference_steps  50\
         --pipeline_scheduler 'DDPMScheduler' \
-        --save_raft_image True
+        --negative_prompt 'painting, sketching, sketches, drawing, ugly , deformed , bad , dark' \
+        --save_raft_images True 
 
